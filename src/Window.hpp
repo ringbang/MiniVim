@@ -21,7 +21,7 @@ public:
 
     void EnsureCursorVisible(const Buffer& buffer);
 
-    //allow_line_end为true时允许停在最后一个字符之后,供插入模式使用
+    // allow_line_end 为 true 时允许停在最后一个字符之后, 供插入模式使用
     void SetCursor(const Buffer& buffer, Position position, bool allow_line_end);
     const Position& GetCursor() const ;
     const Viewport& GetViewport() const ;
@@ -32,9 +32,9 @@ private:
     void MoveUp(const Buffer& buffer, size_t count);
     void MoveDown(const Buffer& buffer, size_t count);
 
-    Position cursor_{}; //Buffer中的光标位置
-    Viewport viewport_{}; //正文可见区域及其滚动偏移
-    size_t desired_column_{0}; //上下移动时希望保持的显示列,经过短行时也保留这个目标
+    Position cursor_{}; // Buffer 中的光标位置
+    Viewport viewport_{}; // 正文可见区域及其滚动偏移
+    size_t desired_column_{0}; // 上下移动时希望保持的显示列, 经过短行时也保留这个目标
 };
 
 } // namespace sjtu
