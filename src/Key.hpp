@@ -1,6 +1,6 @@
 /*
 Key.hpp
-用KeyEvent包装了输入的按键,KeyEvent包含输入按键的种类和ASCII值
+用 KeyEvent 包装了输入的按键, KeyEvent 包含输入按键的种类和 ASCII 值
 */
 #ifndef MINIVIM_KEY_HPP
 #define MINIVIM_KEY_HPP
@@ -9,7 +9,7 @@ namespace sjtu {
 
 constexpr char ControlKey(char key) noexcept {
     //一个C++风格的经典宏,其实就是 #define C(k) (k & 0x1FU)
-    //它是用来将字母键转换为对应的 ASCII 控制字符(即模拟按下 Ctrl+字母 的组合键效果)
+    //它是用来将字母键转换为对应的 ASCII 控制字符 (即模拟按下 Ctrl+字母 的组合键效果)
     return key & 0x1FU;
 }
 
@@ -35,18 +35,18 @@ struct KeyEvent {
     char value_{0};
 
     static constexpr KeyEvent Character(char value) noexcept {
-       //工厂函数,从Char生成一个KeyEvent
-       return {};
+        //工厂函数, 从 Char 生成一个 KeyEvent
+        return {KeyCode::Character, value};
     }
 
     constexpr bool IsCharacter(char expected) const noexcept {
-        //判断当前KeyEvent是不是expected
-        return false;
+        //判断当前 KeyEvent 是不是 expected
+        return (code_ == KeyCode::Character) && (value_ == expected);
     }
 
     constexpr bool IsControl(char expected) const noexcept {
-        //判断当前KeyEvent是不是Ctrl-expected
-        return false;
+        //判断当前 KeyEvent 是不是 Ctrl-expected
+        return (code_ == KeyCode::Character) && (value_ == ControlKey(expected));
     }
 };
 
