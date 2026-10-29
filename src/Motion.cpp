@@ -85,7 +85,7 @@ MotionResult MotionEngine::ComputeLineStart(const Buffer& buffer, Position origi
     return res;
 }
 
-//^: 移动到当前行第一个非空白字符 (本节"空白字符"仅指空格, 不含 Tab).
+//^: 移动到当前行第一个非空白字符
 //当前行全部为空白字符时停在该行最后一个字符; 空行停在该行唯一位置.
 //[count] 与其本身等价, 直接忽略 count. 完成后 curswant = 到达位置的显示列 (SetToTarget).
 //TODO(光标的移动一): 实现

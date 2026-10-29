@@ -126,7 +126,9 @@ void Window::MoveLeft(const Buffer& buffer, std::size_t count) {
     //向左移动 count 个字符, 最多到行首, 并更新目标显示列
     if (count <= cursor_.column_) cursor_.column_ -= count;
     else cursor_.column_ = 0;
-    desired_column_ = CursorCellColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
+    //空行上 h 不移动, 也不更新 curswant (与 vim 一致, 否则会丢掉之前的目标列)
+    const std::string& line = buffer.GetLineAt(cursor_.row_);
+    if (!line.empty()) desired_column_ = CursorCellColumn(line, cursor_.column_);
 }
 
 void Window::MoveRight(const Buffer& buffer, std::size_t count) {
@@ -135,7 +137,9 @@ void Window::MoveRight(const Buffer& buffer, std::size_t count) {
     std::size_t max_column = total_columns > 0? total_columns - 1: 0;
     if (count <= max_column - cursor_.column_) cursor_.column_ += count;
     else cursor_.column_ = max_column;
-    desired_column_ = CursorCellColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
+    //空行上 l 不移动, 也不更新 curswant (与 vim 一致, 否则会丢掉之前的目标列)
+    const std::string& line = buffer.GetLineAt(cursor_.row_);
+    if (!line.empty()) desired_column_ = CursorCellColumn(line, cursor_.column_);
 }
 
 
