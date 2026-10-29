@@ -68,7 +68,13 @@ MotionResult MotionEngine::Compute(const Buffer& buffer, Position origin,
 //完成后 curswant 更新为到达位置的显示列 (SetToTarget).
 //TODO(光标的移动一): 实现
 MotionResult MotionEngine::ComputeLineStart(const Buffer& buffer, Position origin) {
-    return {};
+    MotionResult res;
+    res.ok_ = true;
+    res.target_ = origin;
+    res.target_.column_ = 0;
+    res.kind_ = RangeKind::CharacterwiseExclusive;
+    res.curswant_ = CurswantPolicy::SetToTarget;
+    return res;
 }
 
 //^: 移动到当前行第一个非空白字符 (本节"空白字符"仅指空格, 不含 Tab).
@@ -76,7 +82,26 @@ MotionResult MotionEngine::ComputeLineStart(const Buffer& buffer, Position origi
 //[count] 与其本身等价, 直接忽略 count. 完成后 curswant = 到达位置的显示列 (SetToTarget).
 //TODO(光标的移动一): 实现
 MotionResult MotionEngine::ComputeFirstNonBlank(const Buffer& buffer, Position origin) {
-    return {};
+    MotionResult res;
+    res.ok_ = true;
+    res.target_ = origin;
+    res.curswant_ = CurswantPolicy::SetToTarget;
+    res.kind_ = RangeKind::CharacterwiseExclusive;
+    const std::string& line = buffer.GetLineAt(origin.row_);
+    if (line.empty()) {
+        res.target_.column_ = 0;
+        return res;
+    }
+    else {
+        for (size_t i = 0; i < line.length(); i++) {
+            if (!IsSpaceChar(line[i])) {
+                res.target_.column_ = i;
+                return res;
+            }
+        }
+    res.target_.column_ = line.length() - 1;
+    return res;
+    }
 }
 
 //$: 移动到当前行最后一个字符 (包括行尾空格); 空行停在该行唯一位置.
@@ -87,7 +112,44 @@ MotionResult MotionEngine::ComputeFirstNonBlank(const Buffer& buffer, Position o
 //  注意 count=1 等价于不带 count; 只有 count > 1 才可能失败.
 //TODO(光标的移动一): 实现
 MotionResult MotionEngine::ComputeLineEnd(const Buffer& buffer, Position origin, MotionSpec spec) {
-    return {};
+    MotionResult res;
+    res.kind_ = RangeKind::CharacterwiseInclusive;
+    res.curswant_ = CurswantPolicy::SetMax;
+    res.target_ = origin;
+    // 在行内移动
+    if (!spec.count_ || spec.count_.value() == 1) {
+        res.ok_ = true;
+        const std::string& line = buffer.GetLineAt(origin.row_);
+        if (line.empty()) {
+            res.target_.column_ = 0;
+        }
+        else {
+            res.target_.column_ = line.length() - 1;
+        }
+        return res;
+    }
+    else {
+        // 已经在最后一行且 count > 1
+        if (origin.row_ == buffer.GetLineCount() - 1) {
+            res.ok_ = false;
+            return res;
+        }
+        // 不在最后一行且 count > 1
+        else {
+            res.ok_ = true;
+            size_t last_row = buffer.GetLineCount() - 1;
+            size_t steps = spec.count_.value() - 1;
+            res.target_.row_ = (steps >= last_row - origin.row_) ? last_row : origin.row_ + steps;
+            const std::string& line = buffer.GetLineAt(res.target_.row_);
+            if (line.empty()) {
+                res.target_.column_ = 0;
+            }
+            else {
+                res.target_.column_ = line.length() - 1;
+            }
+            return res;
+        }
+    }
 }
 
 //w: 移动到下一个可以作为 word 开头的位置; 没有这样的位置时移到文件最后一行的最后一个字符.
