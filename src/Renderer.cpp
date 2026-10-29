@@ -81,7 +81,8 @@ std::string Renderer::Render(const Buffer& buffer, const Window& window, const R
     else {
         const std::string& text_line = buffer.GetLineAt(window.GetCursor().row_);
         cursor_row = window.GetCursor().row_ - viewport.top_;
-        cursor_column = BufferColumnToRenderColumn(text_line, window.GetCursor().column_) - viewport.left_;
+        //光标落在 Tab 上时画在 Tab 的最后一格 (与 vim 一致)
+        cursor_column = CursorCellColumn(text_line, window.GetCursor().column_) - viewport.left_;
     }
 
     // 转换为 1-based

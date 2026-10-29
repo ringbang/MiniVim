@@ -70,8 +70,8 @@ void Window::ApplyCurswant(const Buffer& buffer, CurswantPolicy policy) {
         //上下移动保留原目标列 (MoveUp/MoveDown 已实现"经短行钳制但不丢失")
         return;
     case CurswantPolicy::SetToTarget:
-        //把期望列更新为光标当前所在位置的显示列
-        desired_column_ = BufferColumnToRenderColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
+        //把期望列更新为光标所在格子的显示列; 光标落在 Tab 上时取 Tab 的最后一格 (与 vim 一致)
+        desired_column_ = CursorCellColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
         return;
     case CurswantPolicy::SetMax:
         //$: 设为极大值, 之后的 j/k 会始终钳到行尾
@@ -126,7 +126,7 @@ void Window::MoveLeft(const Buffer& buffer, std::size_t count) {
     //向左移动 count 个字符, 最多到行首, 并更新目标显示列
     if (count <= cursor_.column_) cursor_.column_ -= count;
     else cursor_.column_ = 0;
-    desired_column_ = BufferColumnToRenderColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
+    desired_column_ = CursorCellColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
 }
 
 void Window::MoveRight(const Buffer& buffer, std::size_t count) {
@@ -135,7 +135,7 @@ void Window::MoveRight(const Buffer& buffer, std::size_t count) {
     std::size_t max_column = total_columns > 0? total_columns - 1: 0;
     if (count <= max_column - cursor_.column_) cursor_.column_ += count;
     else cursor_.column_ = max_column;
-    desired_column_ = BufferColumnToRenderColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);   
+    desired_column_ = CursorCellColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
 }
 
 

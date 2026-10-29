@@ -53,6 +53,17 @@ inline size_t BufferColumnToRenderColumn(std::string_view line, size_t buffer_co
     return column;
 }
 
+inline size_t CursorCellColumn(std::string_view line, size_t buffer_column) {
+    //光标所在字符占据的屏幕格子: 普通字符是它自己的起始格子, Tab 是其最后一格
+    //与 vim 一致——光标落在 Tab 上时, 硬件光标与 curswant 都在 Tab 的最后一列
+    size_t column = BufferColumnToRenderColumn(line, buffer_column);
+    if (buffer_column < line.size() && line[buffer_column] == '\t') {
+        column += NextScreenColumn(column, '\t') - column - 1;
+    }
+
+    return column;
+}
+
 } 
 
 #endif // MINIVIM_TEXT_LAYOUT_HPP
