@@ -1,5 +1,8 @@
 #include "Motion.hpp"
 
+#include <string>
+#include <algorithm>
+
 namespace sjtu {
 
 namespace {
