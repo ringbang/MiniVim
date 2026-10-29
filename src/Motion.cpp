@@ -20,6 +20,11 @@ bool IsSpaceChar(char value) {
     return value == ' ';
 }
 
+//判断一个字符是否为制表符
+bool IsTabChar(char value) {
+    return value == '\t';
+}
+
 } // namespace
 
 MotionResult MotionEngine::Compute(const Buffer& buffer, Position origin,
@@ -97,7 +102,7 @@ MotionResult MotionEngine::ComputeFirstNonBlank(const Buffer& buffer, Position o
     }
     else {
         for (size_t i = 0; i < line.length(); i++) {
-            if (!IsSpaceChar(line[i])) {
+            if (!IsSpaceChar(line[i]) && !IsTabChar(line[i])) {
                 res.target_.column_ = i;
                 return res;
             }
