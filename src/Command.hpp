@@ -9,7 +9,7 @@ Command.hpp
 
 #include "Key.hpp"
 #include "Types.hpp"
-
+#include "Motion.hpp"
 
 namespace sjtu {
 
@@ -21,16 +21,39 @@ enum class ActionKind {
     InsertBefore,
     InsertAfter,
     EnterCommandLine,
+    Delete,
+    Change,
+    Yank,
+    ShiftLeft,
+    ShiftRight,
+    FlipCase,
+    ReplaceChar,
+    JoinLines,
+    MarkSet,
+    MarkJump,
+    PasteAfter,
+    PasteBefore,
+    Undo,
+    Redo,
+    Repeat,
+    EnterVisual,
+    EnterVisualLine,
+    Scroll,
     //在Advanced部分中你很可能需要添加别的ActionKind
 };
 
 //EditorAction是在NormalMode下我们的Editor真正收到的指令,在Editor中会根据传入的Action的不同让各模块做出对应的处理
 struct EditorAction {
     ActionKind kind_{ActionKind::None};
-    std::optional<Motion> motion_{};//当kind_ = Move时,motion_才有意义,在Basic中表示移动方向(Motion的定义你可以右键跳转查看)
-    //EditorAction和ActionKind分层设计是为了可扩展性,Basic部分的命令都是单个按键,但在Advanced部分中你会遇到多按键命令的情况,
-    //这时候就会遇到按键的pending,比如dw,你可以先构造一个EditorAction存储kind_=Delete,等用户输入motion后令motion=w.
-    //在Advanced部分中你很可能需要添加新的字段,比如std::optional<Count> count_{};
+    std::optional<MotionSpec> motion_spec_{};  // 原 motion_ 升级为 MotionSpec
+    std::optional<size_t> count_{};       // x/X/D/C/r/~/J 等"单键+count"命令用
+    std::optional<char> register_{};      // "前缀 (README:1603)
+    std::optional<char> arg_{};           // r{char}、m{char}、'{char}、f/t{char}、q{char}、@{char}
+
+    //当kind_ = Move时, motion_spec_ 才有意义; 后续 operator 章节也会用到它 (如 dw 构造 kind_=Delete + motion=w)
+    //EditorAction 和 ActionKind 分层设计是为了可扩展性: Basic 的命令都是单个按键,
+    //Advanced 中会遇到按键 pending, 此时 parser 内部先保存状态, 待命令完整后一次性生成 EditorAction
+    //count_ 给 x/X/D/C/r/~/J 等"单键+count"命令用; register_/arg_ 给寄存器与等字符命令预留
 };
 
 
@@ -40,14 +63,35 @@ class NormalModeParser {
 public:
 //把用户传入的新的key喂给parser,从parser生成当前的EditorAction,稍后转给Editor执行
 //这是核心接口,适合扩展和沿用
-    EditorAction Feed(KeyEvent key);
+    std::optional<EditorAction> Feed(KeyEvent key);
+    // 返回 nullopt = 命令尚未完成, Editor 不执行、只等下一个键
+    // 返回 action  = 命令完整, 交给 Editor::Execute
+    void Reset();  // <Esc> 或非法键时清空 pending
 
 private:
-//两个辅助函数,从motion/actionkind直接生成对应editoraction,只对某些简单的情形生效.比如h,我们可以根据motion直接得到editoraction为{ActionKind::Move, Motion::h};
-//这两个接口相当局限,在Advanced中你完全可以不管这两个接口,自己创建更方便的函数来辅助Feed函数
-    EditorAction GenerateMotion(Motion motion);
-    EditorAction GenerateCommand(ActionKind kind);
+    //从 motion/actionkind 直接生成对应 EditorAction; count 为 nullopt 表示用户没输入数字前缀
+    EditorAction GenerateMotion(Motion motion, std::optional<size_t> count = std::nullopt);
+    EditorAction GenerateCommand(ActionKind kind, std::optional<size_t> count = std::nullopt);
 
+    //Feed 按当前状态分发的三个子函数; 返回 nullopt 表示命令尚未完成或已取消
+    std::optional<EditorAction> FeedNormal(char value);
+    std::optional<EditorAction> FeedCount(char value);
+    std::optional<EditorAction> FeedPrefix(char value);
+
+    enum class State {
+        Normal,
+        Count,             // 已输入 [1-9]+ 数字
+        PrefixPending,     // g (ge/gE/gg) → 后续 z (zt/zz/zb) 复用
+        OperatorPending,   // d/c/y/</> 等 motion (含 doubled 形式)
+        RegisterPending,   // "
+        CharPending,       // r/m/'/f/t/q/@ 等"等一个字符"的命令
+        TextObjectPending, // operator 后的 a/i (文本对象章节)
+    };
+    State state_{State::Normal};
+    std::optional<size_t> pending_count_;
+    std::optional<ActionKind> pending_operator_;
+    char pending_prefix_{0};
+    std::optional<char> pending_register_;    
 };
 
 } // namespace sjtu

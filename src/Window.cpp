@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 
 namespace sjtu {
 
@@ -15,26 +16,39 @@ void Window::Resize(ScreenSize terminal_size) {
     viewport_.columns_ = std::max<std::size_t>(terminal_size.columns_, 1);
 }
 
-void Window::ApplyMotion(const Buffer& buffer, Motion motion) {
-    //1. 根据方向调用对应的移动函数, Basic 中每次移动一步, 在 Advanced 中你可以改变 count /添加别的 case
+void Window::ApplyMotion(const Buffer& buffer, MotionSpec spec) {
+    //1. 根据 motion 调用移动: hjkl 走原有的 Move* 函数 (已支持 count 与 curswant 钳制,
+    //   保持 Basic 路径不变); 其余 motion 委托 MotionEngine 纯函数计算
     //2. 将行列限制在 Normal 模式的合法范围内 (Buffer 应始终至少有一行)
     //3. 调整视口, 让移动后的光标可见 (EnsureCursorVisible)
-    // 调用移动函数
-    switch (motion) {
+    size_t count = spec.count_.value_or(1);
+    switch (spec.motion_) {
         case Motion::Left: {
-            MoveLeft(buffer, 1);
+            MoveLeft(buffer, count);
             break;
         }
         case Motion::Right: {
-            MoveRight(buffer, 1);
-            break; 
+            MoveRight(buffer, count);
+            break;
         }
         case Motion::Up: {
-            MoveUp(buffer, 1);
+            MoveUp(buffer, count);
             break;
         }
         case Motion::Down: {
-            MoveDown(buffer, 1);
+            MoveDown(buffer, count);
+            break;
+        }
+        default: {
+            MotionResult result = MotionEngine::Compute(buffer, cursor_, desired_column_, spec);
+            if (!result.ok_) {
+                //命令失败: 光标与视口不动, 但某些命令仍要更新 curswant
+                //(如末行 [count]$ 失败时 curswant 仍设为极大值)
+                ApplyCurswant(buffer, result.curswant_);
+                return;
+            }
+            cursor_ = result.target_;
+            ApplyCurswant(buffer, result.curswant_);
             break;
         }
     }
@@ -45,9 +59,25 @@ void Window::ApplyMotion(const Buffer& buffer, Motion motion) {
     size_t total_columns = buffer.GetLineAt(cursor_.row_).size();
     size_t max_column = total_columns == 0? 0: total_columns - 1;
     cursor_.column_ = std::min(cursor_.column_, max_column);
-    
+
     // 令光标可见
     EnsureCursorVisible(buffer);
+}
+
+void Window::ApplyCurswant(const Buffer& buffer, CurswantPolicy policy) {
+    switch (policy) {
+    case CurswantPolicy::Keep:
+        //上下移动保留原目标列 (MoveUp/MoveDown 已实现"经短行钳制但不丢失")
+        return;
+    case CurswantPolicy::SetToTarget:
+        //把期望列更新为光标当前所在位置的显示列
+        desired_column_ = BufferColumnToRenderColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
+        return;
+    case CurswantPolicy::SetMax:
+        //$: 设为极大值, 之后的 j/k 会始终钳到行尾
+        desired_column_ = std::numeric_limits<size_t>::max();
+        return;
+    }
 }
 
 void Window::EnsureCursorVisible(const Buffer& buffer) {

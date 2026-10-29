@@ -72,8 +72,11 @@ void Editor::ProcessKey(KeyEvent key) {
     //3. Normal 模式下清除旧提示, 将按键交给 parser, 再执行生成的 Action
     if (mode_ == Mode::Normal) {
         message_.clear();
-        EditorAction action = normal_parser_.Feed(key);
-        Execute(action);
+        auto action = normal_parser_.Feed(key);
+        //parser 返回 nullopt 表示命令尚未完成 (如已输入 count 或 g 前缀), 继续等下一个键
+        if (action) {
+            Execute(*action);
+        }
         return;
     }
 }
@@ -85,7 +88,7 @@ void Editor::Execute(const EditorAction& action) {
         return;
     case ActionKind::Move:
         //交给 Window 吧
-        window_.ApplyMotion(buffer_, *action.motion_);
+        window_.ApplyMotion(buffer_, *action.motion_spec_);
         return;
     case ActionKind::InsertBefore:
         //进入 InsertMode, Editor 自己就有对应方法

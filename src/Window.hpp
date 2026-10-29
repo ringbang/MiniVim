@@ -7,6 +7,7 @@ Window保存光标位置和正文的可见区域,根据Buffer的行数和行长�
 #define MINIVIM_WINDOW_HPP
 
 #include "Buffer.hpp"
+#include "Motion.hpp"
 #include "Types.hpp"
 
 
@@ -17,7 +18,7 @@ class Window {
 public:
     void Resize(ScreenSize terminal_size);
 
-    void ApplyMotion(const Buffer& buffer, Motion motion);
+    void ApplyMotion(const Buffer& buffer, MotionSpec spec);
 
     void EnsureCursorVisible(const Buffer& buffer);
 
@@ -31,6 +32,9 @@ private:
     void MoveRight(const Buffer& buffer, size_t count);
     void MoveUp(const Buffer& buffer, size_t count);
     void MoveDown(const Buffer& buffer, size_t count);
+
+    //按 MotionResult 的策略更新期望显示列; 命令失败时也要执行 (如末行 [count]$ 失败仍设极大值)
+    void ApplyCurswant(const Buffer& buffer, CurswantPolicy policy);
 
     Position cursor_{}; // Buffer 中的光标位置
     Viewport viewport_{}; // 正文可见区域及其滚动偏移
