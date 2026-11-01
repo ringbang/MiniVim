@@ -410,13 +410,43 @@ MotionResult MotionEngine::ComputeWordBackwardEnd(const Buffer& buffer, Position
 //  注意: "非空白"建议与 ^ 一致按"空格+Tab 都是空白"处理 (参考实现与 vim 一致), 提交后按 OJ 结果确认.
 //TODO(光标的移动一): 实现
 MotionResult MotionEngine::ComputeGotoLine(const Buffer& buffer, Position origin, std::optional<size_t> count) {
-    return {};
+    MotionResult res;
+    res.ok_ = true;
+    res.target_ = origin;
+    res.kind_ = RangeKind::Linewise;
+    res.curswant_ = CurswantPolicy::SetToTarget;
+    // 无 count 时跳到文件最后一行
+    if (!count) {
+        res.target_.row_ = buffer.GetLineCount() - 1;
+    }
+    // 有 count 时跳到文件第 count 行
+    else {
+        size_t row = std::min<size_t>(buffer.GetLineCount() - 1, count.value() - 1);
+        res.target_.row_ = row;
+    }
+    res.target_.column_ = ComputeFirstNonBlank(buffer, res.target_).target_.column_;
+    return res;
 }
 
 //gg: 跳到文件第一行; [count]gg 跳到文件第 count 行. 列定位与 curswant 规则同 G.
 //TODO(光标的移动一): 实现
 MotionResult MotionEngine::ComputeGotoFirstLine(const Buffer& buffer, Position origin, std::optional<size_t> count) {
-    return {};
+    MotionResult res;
+    res.ok_ = true;
+    res.target_ = origin;
+    res.kind_ = RangeKind::Linewise;
+    res.curswant_ = CurswantPolicy::SetToTarget;
+    // 无 count 时跳到文件第 1 行
+    if (!count) {
+        res.target_.row_ = 0;
+    }
+    // 有 count 时跳到文件第 count 行
+    else {
+        size_t row = std::min<size_t>(buffer.GetLineCount() - 1, count.value() - 1);
+        res.target_.row_ = row;
+    }
+    res.target_.column_ = ComputeFirstNonBlank(buffer, res.target_).target_.column_;
+    return res;
 }
 
 } // namespace sjtu
