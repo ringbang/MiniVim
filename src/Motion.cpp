@@ -437,12 +437,10 @@ MotionResult MotionEngine::ComputeWordBackwardEnd(const Buffer& buffer, Position
 //  行号超过文件总行数时都到文件最后一行.
 //  到目标行后光标停在第一个非空白字符; 行内全为空白停在最后一个字符; 空行停在该行唯一位置;
 //  即使目标行就是当前行也按上述规则重新定位. 完成后 curswant = 光标所在显示列 (SetToTarget).
-//  注意: "非空白"建议与 ^ 一致按"空格+Tab 都是空白"处理 (参考实现与 vim 一致), 提交后按 OJ 结果确认.
-//TODO(光标的移动一): 实现
+//  列定位与 gg/[count]% 共用 LineJumpTarget ("非空白"按空格+Tab, 与 ^ 的 OJ 实测结论一致).
 MotionResult MotionEngine::ComputeGotoLine(const Buffer& buffer, Position origin, std::optional<size_t> count) {
     MotionResult res;
     res.ok_ = true;
-    res.target_ = origin;
     res.kind_ = RangeKind::Linewise;
     res.curswant_ = CurswantPolicy::SetToTarget;
     // 无 count 时跳到文件最后一行
@@ -454,16 +452,14 @@ MotionResult MotionEngine::ComputeGotoLine(const Buffer& buffer, Position origin
         size_t row = std::min<size_t>(buffer.GetLineCount() - 1, count.value() - 1);
         res.target_.row_ = row;
     }
-    res.target_.column_ = ComputeFirstNonBlank(buffer, res.target_).target_.column_;
+    res.target_ = LineJumpTarget(buffer, res.target_.row_);
     return res;
 }
 
 //gg: 跳到文件第一行; [count]gg 跳到文件第 count 行. 列定位与 curswant 规则同 G.
-//TODO(光标的移动一): 实现
 MotionResult MotionEngine::ComputeGotoFirstLine(const Buffer& buffer, Position origin, std::optional<size_t> count) {
     MotionResult res;
     res.ok_ = true;
-    res.target_ = origin;
     res.kind_ = RangeKind::Linewise;
     res.curswant_ = CurswantPolicy::SetToTarget;
     // 无 count 时跳到文件第 1 行
@@ -475,7 +471,7 @@ MotionResult MotionEngine::ComputeGotoFirstLine(const Buffer& buffer, Position o
         size_t row = std::min<size_t>(buffer.GetLineCount() - 1, count.value() - 1);
         res.target_.row_ = row;
     }
-    res.target_.column_ = ComputeFirstNonBlank(buffer, res.target_).target_.column_;
+    res.target_ = LineJumpTarget(buffer, res.target_.row_);
     return res;
 }
 
@@ -485,11 +481,41 @@ MotionResult MotionEngine::ComputeGotoFirstLine(const Buffer& buffer, Position o
 //成功: 光标停在配对括号上, curswant = 其显示列 (SetToTarget), kind = CharacterwiseInclusive.
 //实现建议: 先 BuildQuoteState 一次; 候选是开括号则 ScanBracketMatch(forward=true),
 //闭括号则 ScanBracketMatch(forward=false).
-//TODO(光标的移动二): 实现
 MotionResult MotionEngine::ComputeMatchPercent(const Buffer& buffer, Position origin) {
-    (void)buffer;
-    (void)origin;
-    return {};
+    MotionResult res;
+    res.target_ = origin;
+    //1. 当前行从光标 (含) 向右找第一个括号; 没有候选 → 失败 (README:1127)
+    std::optional<Position> candidate = FindBracketCandidate(buffer, origin);
+    if (!candidate) {
+        res.ok_ = false;
+        return res;
+    }
+    //2. 一次算完全文件的引号状态, 供配对扫描查表
+    std::vector<char> quote = BuildQuoteState(buffer);
+    //3. 按候选类型确定配对方向: 开括号向右扫, 闭括号向左扫
+    char c = buffer.GetLineAt(candidate->row_)[candidate->column_];
+    char open = 0;
+    char close = 0;
+    bool forward = true;
+    switch (c) {
+    case '(': open = '('; close = ')'; break;
+    case '[': open = '['; close = ']'; break;
+    case '{': open = '{'; close = '}'; break;
+    case ')': open = '('; close = ')'; forward = false; break;
+    case ']': open = '['; close = ']'; forward = false; break;
+    case '}': open = '{'; close = '}'; forward = false; break;
+    }
+    std::optional<Position> match = ScanBracketMatch(buffer, quote, *candidate, open, close, forward);
+    //4. 候选没有配对 → 整条命令失败, 不继续尝试下一个候选 (README:1127)
+    if (!match) {
+        res.ok_ = false;
+        return res;
+    }
+    res.ok_ = true;
+    res.target_ = *match;
+    res.kind_ = RangeKind::CharacterwiseInclusive;
+    res.curswant_ = CurswantPolicy::SetToTarget;
+    return res;
 }
 
 //[count]%: 跳到第 ceil(count * N / 100) 行 (N = 文件行数, 行号从 1 开始).
@@ -498,40 +524,148 @@ MotionResult MotionEngine::ComputeMatchPercent(const Buffer& buffer, Position or
 //完成后 curswant = 光标所在的显示列 (SetToTarget), kind = Linewise.
 //TODO(光标的移动二): 实现
 MotionResult MotionEngine::ComputePercentLine(const Buffer& buffer, Position origin, std::optional<size_t> count) {
-    (void)buffer;
-    (void)origin;
-    (void)count;
-    return {};
+    MotionResult res;
+    res.kind_ = RangeKind::Linewise;
+    res.curswant_ = CurswantPolicy::SetToTarget;
+    if (!count || count.value() < 1 || count.value() > 100) {
+        res.ok_ = false;
+        res.target_ = origin;
+        return res;
+    }
+    size_t N = buffer.GetLineCount();
+    size_t row = (count.value() * N + 99) / 100;  // ceil
+    res.ok_ = true;
+    res.target_ = LineJumpTarget(buffer, row - 1);
+    return res;
 }
 
 namespace {
 
-//TODO(光标的移动二): 实现 — 契约见文件中部匿名 namespace 里的声明注释
+//每行的前缀字符总数: line_offset[row] = 前 row 行的字符数之和.
+//BuildQuoteState 与 ScanBracketMatch 共用它做 (row, column) → 线性下标的换算.
+std::vector<size_t> BuildLineOffset(const Buffer& buffer) {
+    std::vector<size_t> offset(buffer.GetLineCount() + 1, 0);
+    for (size_t row = 0; row < buffer.GetLineCount(); ++row) {
+        offset[row + 1] = offset[row] + buffer.GetLineAt(row).size();
+    }
+    return offset;
+}
+
+//全文件计算"双引号状态" (契约见文件中部声明注释): 状态跨行累计, 字符串可跨行.
+//字符串内: \ 转义同一行的下一个字符 (\" 不关串); 未被转义的 " 关串.
+//字符串外: 未被转义的 " 开串 (紧邻奇数个反斜杠视为被转义); 行尾的 \ 不处理跨行转义 (README 未涉及).
 std::vector<char> BuildQuoteState(const Buffer& buffer) {
-    (void)buffer;
-    return {};
+    std::vector<size_t> line_offset = BuildLineOffset(buffer);
+    std::vector<char> quote(line_offset.back(), 0);
+    bool in_string = false;
+    for (size_t row = 0; row < buffer.GetLineCount(); ++row) {
+        const std::string& line = buffer.GetLineAt(row);
+        for (size_t col = 0; col < line.size(); ++col) {
+            char c = line[col];
+            if (in_string) {
+                quote[line_offset[row] + col] = 1;
+                if (c == '\\') {
+                    // 转义同一行的下一个字符: 它也处于串内, 跳过结构判断
+                    if (col + 1 < line.size()) {
+                        ++col;
+                        quote[line_offset[row] + col] = 1;
+                    }
+                } else if (c == '"') {
+                    in_string = false;
+                }
+            } else {
+                quote[line_offset[row] + col] = 0;
+                if (c == '"') {
+                    // 数紧邻的前导反斜杠: 奇数个 → 被转义, 不开串
+                    size_t backslashes = 0;
+                    for (size_t j = col; j > 0 && line[j - 1] == '\\'; --j) {
+                        ++backslashes;
+                    }
+                    if (backslashes % 2 == 0) {
+                        in_string = true;
+                    }
+                }
+            }
+        }
+    }
+    return quote;
 }
 
+//当前行从光标 (含) 向右找第一个 ()[]{}; 没有返回 nullopt.
+//按 README:1121/1127 只在当前行找, 不跨行继续.
 std::optional<Position> FindBracketCandidate(const Buffer& buffer, Position origin) {
-    (void)buffer;
-    (void)origin;
-    return std::nullopt;
+    const std::string& line = buffer.GetLineAt(origin.row_);
+    std::size_t found = line.find_first_of("()[]{}", origin.column_);
+    if (found == std::string::npos) {
+        return std::nullopt;
+    }
+    return Position{origin.row_, found};
 }
 
+//从 start 出发找配对括号 (契约见文件中部声明注释).
 std::optional<Position> ScanBracketMatch(const Buffer& buffer, const std::vector<char>& quote,
                                          Position start, char open, char close, bool forward) {
-    (void)buffer;
-    (void)quote;
-    (void)start;
-    (void)open;
-    (void)close;
-    (void)forward;
+    std::vector<size_t> line_offset = BuildLineOffset(buffer);
+    // (row, column) → 线性下标, 查双引号状态表
+    auto in_string = [&](const Position& pos) {
+        return quote[line_offset[pos.row_] + pos.column_] != 0;
+    };
+    // 数 pos 左边紧邻的连续反斜杠 (文本序, 与扫描方向无关): 奇数个 → 括号被转义
+    auto escaped = [&](const Position& pos) {
+        const std::string& line = buffer.GetLineAt(pos.row_);
+        size_t count = 0;
+        for (size_t j = pos.column_; j > 0 && line[j - 1] == '\\'; --j) {
+            ++count;
+        }
+        return count % 2 == 1;
+    };
+
+    size_t depth = 1; // start 自身是 depth 种子, 不检查它的引号/转义状态
+    // 沿扫描方向"更内层"的括号加深, 回到 depth 0 的括号即配对:
+    // 向前 (候选是开括号): 开括号 ++, 闭括号 --; 向后 (候选是闭括号) 正好相反
+    char inc = forward ? open : close;
+    char dec = forward ? close : open;
+    Position pos = start;
+    while (forward ? StepForward(buffer, pos) : StepBackward(buffer, pos)) {
+        const std::string& line = buffer.GetLineAt(pos.row_);
+        if (line.empty()) {
+            continue; // 空行没有括号
+        }
+        char c = line[pos.column_];
+        if (in_string(pos)) {
+            continue; // 双引号字符串内的括号跳过
+        }
+        if (c == inc) {
+            if (!escaped(pos)) ++depth;
+        } else if (c == dec) {
+            if (!escaped(pos)) {
+                --depth;
+                if (depth == 0) return pos;
+            }
+        }
+        // 其他种类的括号不影响深度
+    }
     return std::nullopt;
 }
 
+//行跳转命令 (G/gg/[count]%) 共用的目标行列定位: 第一个非空白字符 (空格+Tab 均视为空白);
+//行内全为空白停在最后一个字符; 空行停在该行唯一位置.
 Position LineJumpTarget(const Buffer& buffer, std::size_t row) {
-    (void)buffer;
-    return {row, 0};
+    Position pos;
+    pos.row_ = row;
+    const std::string& line = buffer.GetLineAt(row);
+    if (line.empty()) {
+        pos.column_ = 0;
+        return pos;
+    }
+    for (size_t i = 0; i < line.length(); i++) {
+        if (!IsSpaceChar(line[i]) && !IsTabChar(line[i])) {
+            pos.column_ = i;
+            return pos;
+        }
+    }
+    pos.column_ = line.length() - 1;
+    return pos;
 }
 
 } // namespace

@@ -126,9 +126,9 @@ void Window::SetCursor(const Buffer& buffer, Position position, bool allow_line_
 void Window::JumpTo(const Buffer& buffer, Position position) {
     //TODO(光标的移动二): 实现
     //与 SetCursor(buffer, position, false) 类似 (钳制行号与列号 + EnsureCursorVisible),
+    SetCursor(buffer, position, false);
     //但 curswant 用 CursorCellColumn 计算 (落在 Tab 上取 Tab 的最后一格, SetToTarget 语义)
-    (void)buffer;
-    (void)position;
+    desired_column_ = CursorCellColumn(buffer.GetLineAt(cursor_.row_), cursor_.column_);
 }
 
 void Window::MoveLeft(const Buffer& buffer, std::size_t count) {

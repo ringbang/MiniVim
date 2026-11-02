@@ -76,11 +76,19 @@ void Buffer::EraseCharacter(std::size_t row, std::size_t column) {
 
 void Buffer::SplitLine(std::size_t row, std::size_t column) {
     //在第 row 行第 col 列分割, 即在此处敲了回车键
-    //标记维护 (README 未规定切行, 按 vim: 标记跟随原字符):
-    //  标记在本行且 column >= 切分点 → 移到 (row+1, column - 切分点); 其余标记不动
-    //TODO(光标的移动二): 实现
     std::size_t row_length = lines_[row].size();
     if (column > row_length) throw std::runtime_error("Column out of range.");
+    //标记维护 (README 未规定切行, 按 vim: 标记跟随原字符):
+    //  标记在本行且 column >= 切分点 → 移到 (row+1, column - 切分点); 其余标记不动.
+    //  空行没有字符可跟随, 标记留在原行 (与 vim 一致; 冷门边界, OJ 表现不符可再调)
+    if (!lines_[row].empty()) {
+        for (size_t i = 0; i < kMarkCount; i++) {
+            if (mark_valid_[i] && marks_[i].row_ == row && marks_[i].column_ >= column) {
+                marks_[i].row_++;
+                marks_[i].column_ -= column;
+            }
+        }
+    }
     if (column == row_length) lines_.insert(lines_.begin() + row + 1, "");
     else {
         std::string old_row = lines_[row].substr(0, column);
@@ -97,7 +105,14 @@ void Buffer::JoinLine(std::size_t row) {
     //把第 row + 1 行合并进第 row 行
     //标记维护 (README 未规定合并, 按 vim: 标记跟随原字符):
     //  标记在被合并行 row+1 → 移到 (row, 原 row 行长度 + 原列); row+1 以下的标记上移一行
-    //TODO(光标的移动二): 实现
+    for (size_t i = 0; i < kMarkCount; i++) {
+        if (mark_valid_[i] && marks_[i].row_ >= row + 1) {
+            if (marks_[i].row_ == row + 1) {
+                marks_[i].column_ += lines_[row].size();
+            }
+            marks_[i].row_--;
+        }
+    }
     lines_[row] += lines_[row + 1];
     lines_.erase(lines_.begin() + row + 1);
     modified_ = true;
@@ -155,7 +170,7 @@ void Buffer::ClearMark(char name) {
 void Buffer::InsertLine(std::size_t row) {
     //TODO(光标的移动二): 实现
     //1. 越界检查; 
-    if (row >= lines_.size()) {
+    if (row > lines_.size()) {
         throw std::runtime_error("Row out of range.");
     }
     // 在 lines_ 的 row 处插入空串, 并置 modified_ / end_with_newline_
@@ -170,7 +185,7 @@ void Buffer::InsertLine(std::size_t row) {
 std::string Buffer::EraseLine(std::size_t row) {
     //TODO(光标的移动二): 实现
     //1. 取出 lines_[row] 的内容作为返回值
-    const std::string &res = lines_[row];
+    const std::string res = lines_[row];
     //2. 删除该行并置 modified_ / end_with_newline_ (保持 Buffer 至少有一行, 全删光时留一个空行)
     lines_.erase(lines_.begin() + row);
     if (lines_.empty()) {
@@ -186,14 +201,27 @@ std::string Buffer::EraseLine(std::size_t row) {
 void Buffer::AdjustMarksInsertLine(std::size_t row) {
     //TODO(光标的移动二): 实现
     //位置在 row 处及以下的标记整体下移一行 (README: 在标记位置及之前插入完整行, 标记随原文本后移)
-    (void)row;
+    for (size_t i = 0; i < kMarkCount; i++) {
+        if (mark_valid_[i] && marks_[i].row_ >= row) {
+            marks_[i].row_++;
+        }
+    }
 }
 
 void Buffer::AdjustMarksEraseLine(std::size_t row) {
     //TODO(光标的移动二): 实现
-    //row 行上的标记全部丢失 (mark_valid_ = false, README: 标记所在行被删除则标记丢失);
-    //row 以下的标记上移一行
-    (void)row;
+    for (size_t i = 0; i < kMarkCount; i++) {
+        if (mark_valid_[i]) {
+            //row 行上的标记全部丢失 (mark_valid_ = false, README: 标记所在行被删除则标记丢失);
+            if (marks_[i].row_ == row) {
+                mark_valid_[i] = false;
+            }
+            //row 以下的标记上移一行
+            else if (marks_[i].row_ > row) {
+                marks_[i].row_--;
+            }
+        }
+    }
 }
 
 

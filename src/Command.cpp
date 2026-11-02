@@ -149,8 +149,14 @@ std::optional<EditorAction> NormalModeParser::FeedChar(char value) {
     //TODO(光标的移动二): 实现
     //1. pending_char_kind_ 有值且 'a' <= value <= 'z' 时构造 {kind = *pending_char_kind_, arg_ = value}
     //   (注意先 Reset 再返回 action, 与 FeedCount/FeedPrefix 的做法一致)
+    if (pending_char_kind_ && value >= 'a' && value <= 'z' ) {
+        EditorAction act;
+        act.kind_ = *pending_char_kind_;
+        act.arg_ = value;
+        Reset();
+        return act;
+    }
     //2. 其余情况 Reset 后返回 nullopt
-    (void)value;
     Reset();
     return std::nullopt;
 }
