@@ -1,4 +1,5 @@
 #include "Editor.hpp"
+#include <cstdio>
 
 #include <algorithm>
 #include <cctype>
@@ -258,8 +259,8 @@ void Editor::LeaveSearch() {
 }
 
 void Editor::HandleSearch(KeyEvent key) {
-    //README:1097 只响应可打印 ASCII (/、?、反斜杠都是普通字符), 其余控制键忽略,
-    //但 <BS> 支持编辑输入框 (测试点 101 "input editing", 与 OJ 参考一致)
+    //README:1097 只响应可打印 ASCII (/、?、反斜杠都是普通字符), 其余控制键一律忽略 (含 <BS>/<DEL>).
+    //OJ 证据: 加入 <BS> 编辑后 101/105/117/118 的首个分歧位置反而提前, 说明参考实现不做提示编辑.
     //<CR> 提交搜索, <Esc> 打断并完全恢复进入前的位置 (输入期间光标本就没动, 不修改搜索记录)
     if (key.code_ == KeyCode::Escape) {
         LeaveSearch();
@@ -270,21 +271,14 @@ void Editor::HandleSearch(KeyEvent key) {
         //[count]/ [count]? 取循环序第 count 个匹配 (测试点 113/114)
         auto target = search_engine_.Commit(buffer_, search_input_, search_direction_,
                                             window_.GetCursor(), search_count_);
+        bool no_old_record = search_input_.empty() && !search_engine_.HasPattern();
         LeaveSearch();
         if (target) {
             window_.JumpTo(buffer_, *target); //成功: 光标停在匹配的第一个字符
-        } else {
+        } else if (!no_old_record) {
             message_ = "Pattern not found"; //TODO: 与 OJ 参考实现的提示文本核对, 必要时调整
         }
-        return;
-    }
-    if (key.code_ == KeyCode::Backspace) {
-        if (!search_input_.empty()) search_input_.pop_back();
-        else LeaveSearch(); // 空提示按 <BS> 取消搜索 (Vim 与通过 OJ 的旁证实现一致, 测试点 101/105 "cancellation and empty prompt")
-        return;
-    }
-    if (key.code_ == KeyCode::Delete) {
-        if (search_input_.empty()) LeaveSearch(); // 空提示按 <DEL> 取消搜索; 光标恒在末尾, 非空时 DEL 无效果 (与 Vim 一致)
+        //空提示且无旧串: 静默失败 (与测试点 101/105 的 "empty prompt" 一致)
         return;
     }
     if (key.code_ == KeyCode::Character && IsPrintable(key.value_)) {

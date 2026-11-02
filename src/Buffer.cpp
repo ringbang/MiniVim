@@ -78,17 +78,9 @@ void Buffer::SplitLine(std::size_t row, std::size_t column) {
     //在第 row 行第 col 列分割, 即在此处敲了回车键
     std::size_t row_length = lines_[row].size();
     if (column > row_length) throw std::runtime_error("Column out of range.");
-    //标记维护 (README 未规定切行, 按 vim: 标记跟随原字符):
-    //  标记在本行且 column >= 切分点 → 移到 (row+1, column - 切分点); 其余标记不动.
-    //  空行没有字符可跟随, 标记留在原行 (与 vim 一致; 冷门边界, OJ 表现不符可再调)
-    if (!lines_[row].empty()) {
-        for (size_t i = 0; i < kMarkCount; i++) {
-            if (mark_valid_[i] && marks_[i].row_ == row && marks_[i].column_ >= column) {
-                marks_[i].row_++;
-                marks_[i].column_ -= column;
-            }
-        }
-    }
+    //标记维护 (README 规则二: 行内插入不移动标记 → 切分行上的标记原地不动, 列也不变;
+    //测试点 94 "line-split anchor updates": 切分行以下的标记随新插入的行整体下移)
+    AdjustMarksInsertLine(row + 1);
     if (column == row_length) lines_.insert(lines_.begin() + row + 1, "");
     else {
         std::string old_row = lines_[row].substr(0, column);
@@ -103,9 +95,9 @@ void Buffer::SplitLine(std::size_t row, std::size_t column) {
 
 void Buffer::JoinLine(std::size_t row) {
     //把第 row + 1 行合并进第 row 行
-    //标记维护 (README 未规定合并; OJ 实测):
-    //  被合并行有字符 → 标记跟随到 (row, 原 row 行长度 + 原列) (测试点 142);
-    //  被合并行为空行 → 该行标记丢失 (空行没有字符可跟随, 测试点 143/144);
+    //标记维护 (OJ 实测, 测试点 142/143/144):
+    //  被合并行有字符 → 标记只上移一行, 列不变 (与 vim 跟随文字不同: 142 的判据);
+    //  被合并行为空行 → 该行标记丢失 (143/144);
     //  row+1 以下的标记上移一行
     bool merged_empty = lines_[row + 1].empty();
     for (size_t i = 0; i < kMarkCount; i++) {
@@ -114,7 +106,6 @@ void Buffer::JoinLine(std::size_t row) {
             if (merged_empty) {
                 mark_valid_[i] = false;
             } else {
-                marks_[i].column_ += lines_[row].size();
                 marks_[i].row_ = row;
             }
         } else if (marks_[i].row_ > row + 1) {

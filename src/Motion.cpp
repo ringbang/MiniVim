@@ -485,6 +485,72 @@ MotionResult MotionEngine::ComputeGotoFirstLine(const Buffer& buffer, Position o
 MotionResult MotionEngine::ComputeMatchPercent(const Buffer& buffer, Position origin) {
     MotionResult res;
     res.target_ = origin;
+    //0. Vim findmatchlimit 的注释定界符特例 (测试点 88 "comment text"):
+    //   光标在 /* 或 */ 定界符上时, 跳到配对的定界符, 而不是找括号 (// 不是定界符).
+    //   向前: 找下一个 */, 光标落在它的 / 上; 向后: 记住最后遇到的 /*,
+    //   扫描中遇到 */ 时若已找到 /* 则落在其 / 上, 否则失败; 找不到也失败.
+    {
+        const std::string& cline = buffer.GetLineAt(origin.row_);
+        char cc = origin.column_ < cline.size() ? cline[origin.column_] : '\0';
+        int comment_dir = 0; // 1 = 向前, -1 = 向后
+        Position cpos = origin;
+        if (cc == '/') {
+            if (origin.column_ + 1 < cline.size() && cline[origin.column_ + 1] == '*') {
+                comment_dir = 1;
+                cpos.column_++;
+            } else if (origin.column_ > 0 && cline[origin.column_ - 1] == '*') {
+                comment_dir = -1;
+                cpos.column_--;
+            }
+        } else if (cc == '*') {
+            if (origin.column_ + 1 < cline.size() && cline[origin.column_ + 1] == '/') {
+                comment_dir = -1;
+            } else if (origin.column_ > 0 && cline[origin.column_ - 1] == '/') {
+                comment_dir = 1;
+            }
+        }
+        if (comment_dir != 0) {
+            std::optional<Position> found;
+            Position pos = cpos;
+            if (comment_dir == 1) {
+                while (StepForward(buffer, pos)) {
+                    const std::string& line = buffer.GetLineAt(pos.row_);
+                    if (line.empty()) continue;
+                    if (pos.column_ + 1 < line.size() && line[pos.column_] == '*'
+                        && line[pos.column_ + 1] == '/') {
+                        found = Position{pos.row_, pos.column_ + 1};
+                        break;
+                    }
+                }
+            } else {
+                while (StepBackward(buffer, pos)) {
+                    const std::string& line = buffer.GetLineAt(pos.row_);
+                    if (pos.column_ == 0) continue; // 行首没有前一个字符
+                    if (line[pos.column_] == '/' && line[pos.column_ - 1] == '*') {
+                        // 遇到 */: 已记住 /* 则返回它, 否则失败 (vim search2141.c:2507)
+                        if (found) { res.ok_ = true; res.target_ = *found; }
+                        else res.ok_ = false;
+                        res.kind_ = RangeKind::CharacterwiseInclusive;
+                        res.curswant_ = CurswantPolicy::SetToTarget;
+                        return res;
+                    }
+                    if (line[pos.column_] == '*' && line[pos.column_ - 1] == '/'
+                        && (pos.column_ == 1 || line[pos.column_ - 2] != '*')) {
+                        found = Position{pos.row_, pos.column_ - 1}; // 落在 / 上
+                    }
+                }
+            }
+            res.kind_ = RangeKind::CharacterwiseInclusive;
+            res.curswant_ = CurswantPolicy::SetToTarget;
+            if (found) {
+                res.ok_ = true;
+                res.target_ = *found;
+            } else {
+                res.ok_ = false; // 没有配对定界符: 失败, 光标不动
+            }
+            return res;
+        }
+    }
     //1. 当前行从光标 (含) 向右找第一个括号; 没有候选 → 失败 (README:1127)
     std::optional<Position> candidate = FindBracketCandidate(buffer, origin);
     if (!candidate) {
