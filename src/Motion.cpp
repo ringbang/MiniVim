@@ -214,23 +214,25 @@ Position PrevWordEnd(const Buffer& buffer, Position pos, bool cap) {
 
 // ---- 光标的移动(二): 括号匹配的辅助函数 (定义见文件末尾) ----
 
-//全文件计算"双引号状态": quote[i] = 处理到第 i 个字符时是否处于双引号字符串内 (跨行累计, 字符串可跨行).
-//  字符串外: 任意 " 开启字符串 (反斜杠在字符串外是普通字符, 不转义引号也不转义括号);
-//  字符串内: \ 转义同一行的下一个字符 (所以 \" 不关闭字符串), 未被转义的 " 关闭字符串.
-//  README "反斜杠也参与筛选" 只作用于字符串内的引号配对, 这是测试点 88 的结论.
-std::vector<char> BuildQuoteState(const Buffer& buffer);
+//pos 前紧邻奇数个连续反斜杠 (同一行内) → 该字符被转义 (Vim 奇偶规则, 测试点 88);
+//引号翻转与括号配对都用它, 串内串外一致
+bool EscapedBefore(const Buffer& buffer, Position pos);
 
 //在 origin 所在行从 origin.column_ 起 (含) 向右找第一个 ()[]{} 括号字符; 没有返回 nullopt.
 //按 README 字面理解: 候选选择不区分引号与转义, 只找括号字符.
 std::optional<Position> FindBracketCandidate(const Buffer& buffer, Position origin);
 
-//从 start 出发找配对括号: depth 从 1 起, 从 start 的前/后一个位置扫描,
-//遇同型开括号 (open) 加 1, 同型闭括号 (close) 减 1, 减到 0 即配对; 其他种类括号不影响深度.
-//forward = true 向右扫描 (候选是开括号), false 向左 (候选是闭括号); 找不到返回 nullopt.
-//双引号字符串内的括号跳过 (quote 数组判定); 字符串外的反斜杠是普通字符, 括号照常计数.
-//起始括号自身始终作为 depth 的种子, 不检查它的引号状态.
-std::optional<Position> ScanBracketMatch(const Buffer& buffer, const std::vector<char>& quote,
-                                         Position start, char open, char close, bool forward);
+//从 start 出发找配对括号 (Vim findmatchlimit / search2141.c 在线扫描的忠实移植, 测试点 88):
+//  候选由 FindBracketCandidate 按字面选出; 候选前紧邻反斜杠的奇偶记为 match_escaped,
+//  配对括号必须与其奇偶一致 (被转义的候选只配被转义的括号);
+//  引号: 每行第一次访问时统计引号数 (跳过 \X 与 '"'), 偶数个才启用引号处理 (do_quotes),
+//  奇数个时该行引号全部忽略, 除非本行或上一行以反斜杠结尾 (续行);
+//  扫描中维护 inquote: 前导反斜杠为偶数的 " 翻转; 行尾不是反斜杠时重置;
+//  括号接受条件: (!inquote || start_in_quotes) 且转义奇偶 == match_escaped;
+//  单引号: 跳过 'x' 与 '\x' 单字符字面量 (向前向后对称).
+//其他种类括号不影响深度; 跨行扫描; 找不到返回 nullopt. 起始括号自身是 depth 种子.
+std::optional<Position> ScanBracketMatch(const Buffer& buffer, Position start,
+                                         char open, char close, bool forward);
 
 //行跳转命令 (G/gg/[count]%) 共用的目标行列定位: 第一个非空白字符;
 //行内全为空白 (空格+Tab, 与 ^ 的实测结论一致) 停在最后一个字符; 空行停在该行唯一位置.
@@ -479,8 +481,7 @@ MotionResult MotionEngine::ComputeGotoFirstLine(const Buffer& buffer, Position o
 //配对扫描跨行, 用同种括号的嵌套深度确定配对, 其他种类括号不影响深度 (README:1117).
 //候选没有配对时命令失败 (ok_ = false, 光标与视口不动), 不继续尝试下一个候选 (README:1127).
 //成功: 光标停在配对括号上, curswant = 其显示列 (SetToTarget), kind = CharacterwiseInclusive.
-//实现建议: 先 BuildQuoteState 一次; 候选是开括号则 ScanBracketMatch(forward=true),
-//闭括号则 ScanBracketMatch(forward=false).
+//引号/反斜杠/单引号字面量规则由 ScanBracketMatch 在线处理 (Vim findmatchlimit, 测试点 88).
 MotionResult MotionEngine::ComputeMatchPercent(const Buffer& buffer, Position origin) {
     MotionResult res;
     res.target_ = origin;
@@ -490,9 +491,7 @@ MotionResult MotionEngine::ComputeMatchPercent(const Buffer& buffer, Position or
         res.ok_ = false;
         return res;
     }
-    //2. 一次算完全文件的引号状态, 供配对扫描查表
-    std::vector<char> quote = BuildQuoteState(buffer);
-    //3. 按候选类型确定配对方向: 开括号向右扫, 闭括号向左扫
+    //2. 按候选类型确定配对方向: 开括号向右扫, 闭括号向左扫
     char c = buffer.GetLineAt(candidate->row_)[candidate->column_];
     char open = 0;
     char close = 0;
@@ -505,8 +504,8 @@ MotionResult MotionEngine::ComputeMatchPercent(const Buffer& buffer, Position or
     case ']': open = '['; close = ']'; forward = false; break;
     case '}': open = '{'; close = '}'; forward = false; break;
     }
-    std::optional<Position> match = ScanBracketMatch(buffer, quote, *candidate, open, close, forward);
-    //4. 候选没有配对 → 整条命令失败, 不继续尝试下一个候选 (README:1127)
+    std::optional<Position> match = ScanBracketMatch(buffer, *candidate, open, close, forward);
+    //3. 候选没有配对 → 整条命令失败, 不继续尝试下一个候选 (README:1127)
     if (!match) {
         res.ok_ = false;
         return res;
@@ -541,48 +540,15 @@ MotionResult MotionEngine::ComputePercentLine(const Buffer& buffer, Position ori
 
 namespace {
 
-//每行的前缀字符总数: line_offset[row] = 前 row 行的字符数之和.
-//BuildQuoteState 与 ScanBracketMatch 共用它做 (row, column) → 线性下标的换算.
-std::vector<size_t> BuildLineOffset(const Buffer& buffer) {
-    std::vector<size_t> offset(buffer.GetLineCount() + 1, 0);
-    for (size_t row = 0; row < buffer.GetLineCount(); ++row) {
-        offset[row + 1] = offset[row] + buffer.GetLineAt(row).size();
+//pos 前紧邻奇数个连续反斜杠 (同一行内) → 该字符被转义 (Vim 奇偶规则, 测试点 88);
+//引号翻转与括号配对的转义判定都用它, 串内串外一致
+bool EscapedBefore(const Buffer& buffer, Position pos) {
+    const std::string& line = buffer.GetLineAt(pos.row_);
+    size_t count = 0;
+    for (size_t j = pos.column_; j > 0 && line[j - 1] == '\\'; --j) {
+        ++count;
     }
-    return offset;
-}
-
-//全文件计算"双引号状态" (契约见文件中部声明注释): 状态跨行累计, 字符串可跨行.
-//字符串内: \ 转义同一行的下一个字符 (\" 不关串); 未被转义的 " 关串.
-//字符串外: 未被转义的 " 开串 (紧邻奇数个反斜杠视为被转义); 行尾的 \ 不处理跨行转义 (README 未涉及).
-std::vector<char> BuildQuoteState(const Buffer& buffer) {
-    std::vector<size_t> line_offset = BuildLineOffset(buffer);
-    std::vector<char> quote(line_offset.back(), 0);
-    bool in_string = false;
-    for (size_t row = 0; row < buffer.GetLineCount(); ++row) {
-        const std::string& line = buffer.GetLineAt(row);
-        for (size_t col = 0; col < line.size(); ++col) {
-            char c = line[col];
-            if (in_string) {
-                quote[line_offset[row] + col] = 1;
-                if (c == '\\') {
-                    // 转义同一行的下一个字符: 它也处于串内, 跳过结构判断
-                    if (col + 1 < line.size()) {
-                        ++col;
-                        quote[line_offset[row] + col] = 1;
-                    }
-                } else if (c == '"') {
-                    in_string = false;
-                }
-            } else {
-                quote[line_offset[row] + col] = 0;
-                // 字符串外反斜杠是普通字符: 任何 " 都开启字符串 (测试点 88)
-                if (c == '"') {
-                    in_string = true;
-                }
-            }
-        }
-    }
-    return quote;
+    return count % 2 == 1;
 }
 
 //当前行从光标 (含) 向右找第一个 ()[]{}; 没有返回 nullopt.
@@ -596,39 +562,156 @@ std::optional<Position> FindBracketCandidate(const Buffer& buffer, Position orig
     return Position{origin.row_, found};
 }
 
-//从 start 出发找配对括号 (契约见文件中部声明注释).
-std::optional<Position> ScanBracketMatch(const Buffer& buffer, const std::vector<char>& quote,
-                                         Position start, char open, char close, bool forward) {
-    std::vector<size_t> line_offset = BuildLineOffset(buffer);
-    // (row, column) → 线性下标, 查双引号状态表
-    auto in_string = [&](const Position& pos) {
-        return quote[line_offset[pos.row_] + pos.column_] != 0;
+//从 start 出发找配对括号 (契约见文件中部声明注释; Vim findmatchlimit 的忠实移植)
+std::optional<Position> ScanBracketMatch(const Buffer& buffer, Position start,
+                                         char open, char close, bool forward) {
+    const bool backwards = !forward;
+    const bool match_escaped = EscapedBefore(buffer, start); // 候选的转义奇偶
+    bool inquote = false;
+    int start_in_quotes = -1; // -1 = MAYBE, 0 = FALSE, 1 = TRUE
+    // 每行第一次访问时计算的"引号处理是否启用": -1 未算, 0 奇数引号(忽略), 1 偶数(启用)
+    std::vector<char> do_quotes_cache(buffer.GetLineCount(), -1);
+
+    size_t count = 0; // 深度: 候选自身不计, 遇到第一个配对括号即返回 (与 vim 一致)
+    char inc = forward ? open : close; // 沿扫描方向"更内层"的括号
+    char dec = forward ? close : open;
+
+    // 向前: 从行尾 NUL 位置进入下一行行首; 向后: 从行首进入上一行的 NUL 位置.
+    // 每行的 NUL 位置都会被访问 (行尾重置引号状态用)
+    auto advance = [&](Position& p) -> bool {
+        if (backwards) {
+            if (p.column_ == 0) {
+                if (p.row_ == 0) return false;
+                --p.row_;
+                p.column_ = buffer.GetLineAt(p.row_).size(); // 停在行尾 NUL 位置
+            } else {
+                --p.column_;
+            }
+            return true;
+        }
+        if (p.column_ == buffer.GetLineAt(p.row_).size()) {
+            if (p.row_ + 1 >= buffer.GetLineCount()) return false;
+            ++p.row_;
+            p.column_ = 0;
+        } else {
+            ++p.column_;
+        }
+        return true;
     };
 
-    size_t depth = 1; // start 自身是 depth 种子, 不检查它的引号状态
-    // 沿扫描方向"更内层"的括号加深, 回到 depth 0 的括号即配对:
-    // 向前 (候选是开括号): 开括号 ++, 闭括号 --; 向后 (候选是闭括号) 正好相反
-    char inc = forward ? open : close;
-    char dec = forward ? close : open;
+    // 进入新行时的 do_quotes 初始化 (vim search2141.c:2546-2610);
+    // first_pos 非空表示起始行 (at_start 锚点 = 扫描将要处理的第一个位置)
+    auto init_line = [&](Position& p, const Position* first_pos) {
+        if (do_quotes_cache[p.row_] >= 0) return;
+        const std::string& line = buffer.GetLineAt(p.row_);
+        // 注意: 与 vim 一致, 计数从 -1 开始 (do_quotes == -1 是"进入新行"的哨兵值),
+        // 这样 &1 之后 1 才表示"引号数为偶数"
+        int do_quotes = -1;
+        int at_start = 0;
+        size_t col = 0;
+        while (col < line.size()) {
+            if (first_pos && col == first_pos->column_ + (backwards ? 1 : 0)) {
+                at_start = do_quotes & 1;
+            }
+            if (line[col] == '"'
+                && (col == 0 || line[col - 1] != '\''
+                    || (col + 1 < line.size() && line[col + 1] != '\''))) {
+                ++do_quotes;
+            }
+            if (line[col] == '\\' && col + 1 < line.size()) ++col; // 跳过 \X
+            ++col;
+        }
+        do_quotes &= 1; // 1 = 引号数为偶数
+        if (!do_quotes) {
+            // 奇数引号行: 默认全部忽略; 行尾反斜杠 (本行或上一行) 提供续行
+            inquote = false;
+            if (!line.empty() && line.back() == '\\') {
+                do_quotes = 1;
+                if (start_in_quotes == -1) {
+                    inquote = true;
+                    start_in_quotes = 1;
+                } else if (backwards) {
+                    inquote = true;
+                }
+            }
+            if (p.row_ > 0) {
+                const std::string& prev = buffer.GetLineAt(p.row_ - 1);
+                if (!prev.empty() && prev.back() == '\\') {
+                    do_quotes = 1;
+                    if (start_in_quotes == -1) {
+                        inquote = at_start != 0;
+                        if (inquote) start_in_quotes = 1;
+                    } else if (!backwards) {
+                        inquote = true;
+                    }
+                }
+            }
+        }
+        do_quotes_cache[p.row_] = (char)do_quotes;
+        if (start_in_quotes == -1) start_in_quotes = 0; // MAYBE → FALSE
+    };
+
+    init_line(start, &start);
+
     Position pos = start;
-    while (forward ? StepForward(buffer, pos) : StepBackward(buffer, pos)) {
+    while (true) {
+        if (!advance(pos)) return std::nullopt;
+        if (do_quotes_cache[pos.row_] < 0) init_line(pos, nullptr);
+
         const std::string& line = buffer.GetLineAt(pos.row_);
-        if (line.empty()) {
-            continue; // 空行没有括号
+        char c = (pos.column_ < line.size()) ? line[pos.column_] : '\0';
+        if (c == '\0') {
+            // 行尾: 非反斜杠结尾则重置引号状态 (vim search2141.c:2625)
+            if (pos.column_ == 0 || line[pos.column_ - 1] != '\\') {
+                inquote = false;
+                start_in_quotes = 0;
+            }
+            continue;
         }
-        char c = line[pos.column_];
-        if (in_string(pos)) {
-            continue; // 双引号字符串内的括号跳过
+        if (c == '"') {
+            // 前导反斜杠为偶数的引号才翻转 (vim search2141.c:2634)
+            if (do_quotes_cache[pos.row_] && !EscapedBefore(buffer, pos)) {
+                inquote = !inquote;
+                start_in_quotes = 0;
+            }
+            continue;
         }
-        if (c == inc) {
-            ++depth;
-        } else if (c == dec) {
-            --depth;
-            if (depth == 0) return pos;
+        if (c == '\'' && open != '\'' && close != '\'') {
+            // 跳过单引号单字符字面量 'x' 或 '\x' (vim search2141.c:2653)
+            if (backwards) {
+                if (pos.column_ > 1) {
+                    if (line[pos.column_ - 2] == '\'') { pos.column_ -= 2; continue; }
+                    if (line[pos.column_ - 2] == '\\' && pos.column_ > 2
+                        && line[pos.column_ - 3] == '\'') {
+                        pos.column_ -= 3;
+                        continue;
+                    }
+                }
+            } else if (pos.column_ + 1 < line.size()) {
+                if (line[pos.column_ + 1] == '\\' && pos.column_ + 2 < line.size()
+                    && pos.column_ + 3 < line.size() && line[pos.column_ + 3] == '\'') {
+                    pos.column_ += 3;
+                    continue;
+                }
+                if (pos.column_ + 2 < line.size() && line[pos.column_ + 2] == '\'') {
+                    pos.column_ += 2;
+                    continue;
+                }
+            }
+            continue; // 普通单引号 (如 jon's)
+        }
+        // 括号接受条件: 引号外, 或起点也在引号内 (续行); 且转义奇偶与候选一致
+        if ((!inquote || start_in_quotes == 1) && (c == inc || c == dec)
+            && EscapedBefore(buffer, pos) == match_escaped) {
+            if (c == inc) {
+                ++count;
+            } else {
+                if (count == 0) return pos;
+                --count;
+            }
         }
         // 其他种类的括号不影响深度 (README:1123)
     }
-    return std::nullopt;
 }
 
 //行跳转命令 (G/gg/[count]%) 共用的目标行列定位: 第一个非空白字符 (空格+Tab 均视为空白);

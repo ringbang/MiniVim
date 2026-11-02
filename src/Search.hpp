@@ -32,9 +32,11 @@ public:
     // / ? 提交搜索: pattern 非空时保存新串并重建缓存 (即使本次找不到也保存, README:1105);
     // pattern 为空时复用旧串、使用本次方向, 没有旧串则失败且不保存任何状态.
     // origin 是搜索起点 (输入期间光标静止, 即进入搜索框时的光标).
-    // 成功返回第 1 个匹配的起点 (光标停在匹配的第一个字符), 失败返回 nullopt (光标与视口不动).
+    // count 为 nullopt 时按 1 处理; [count]/ [count]? 取该方向循环序第 count 个匹配 (允许多次环绕, 取模定位).
+    // 成功返回目标匹配的起点 (光标停在匹配的第一个字符), 失败返回 nullopt (光标与视口不动).
     std::optional<Position> Commit(const Buffer& buffer, const std::string& pattern,
-                                   bool forward, Position origin);
+                                   bool forward, Position origin,
+                                   std::optional<std::size_t> count = std::nullopt);
 
     // n/N 重复搜索: same_direction = true 是 n (沿用上次方向), false 是 N (反方向);
     // count 为 nullopt 时按 1 处理; [count] 表示该方向上第 count 个匹配, 允许多次环绕.

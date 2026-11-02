@@ -70,8 +70,9 @@ std::optional<EditorAction> NormalModeParser::FeedNormal(char value) {
     case 'N': return GenerateCommand(ActionKind::SearchPrev);
     case '%': return GenerateMotion(Motion::MatchPercent);
     case 'm':
-    case '\'':
-        //m/' 等一个字符 (m{a-z} / 'a), 具体字符由 FeedChar 收尾
+    case '`':
+        //m/` 等一个字符 (m{a-z} / `a), 具体字符由 FeedChar 收尾;
+        //跳转键只绑反引号 ` (README 大纲行、vim 语义与通过 OJ 的旁证实现一致; 单引号不绑)
         pending_char_kind_ = (value == 'm') ? ActionKind::MarkSet : ActionKind::MarkJump;
         state_ = State::CharPending;
         return std::nullopt;
@@ -118,12 +119,14 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
     case 'N': action = GenerateCommand(ActionKind::SearchPrev, pending_count_); break;
     case '%': action = GenerateMotion(Motion::PercentLine, pending_count_); break;
     case 'm':
-    case '\'':
-        //count 对 m/' 无效, 按"忽略 count"处理 (测试点 93/96), 与 FeedNormal 一样进入 CharPending;
+    case '`':
+        //count 对 m/` 无效, 按"忽略 count"处理 (测试点 93/96), 与 FeedNormal 一样进入 CharPending;
         //pending_count_ 保留到 FeedChar 收尾时一并清掉, 值本身被忽略
         pending_char_kind_ = (value == 'm') ? ActionKind::MarkSet : ActionKind::MarkJump;
         state_ = State::CharPending;
         return std::nullopt;
+    case '/': action = GenerateCommand(ActionKind::EnterSearchForward, pending_count_); break;
+    case '?': action = GenerateCommand(ActionKind::EnterSearchBackward, pending_count_); break;
     default:
         //不支持的键: 取消命令并丢弃该键
         action = std::nullopt;

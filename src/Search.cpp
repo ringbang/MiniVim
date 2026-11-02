@@ -5,13 +5,13 @@
 namespace sjtu {
 
 // / ? 提交搜索 (契约见 Search.hpp 的声明注释)
-//TODO(光标的移动二): 实现
 //1. pattern 非空: 保存 pattern_/forward_/has_pattern_ 并 RebuildMatches
 //   (即使 matches_ 为空即"本次找不到", 也要保存, README:1105)
 //2. pattern 为空: 无旧串直接失败; 有旧串复用 pattern_ 并更新 forward_ 为本次方向
-//3. 在缓存中取循环序第 1 个匹配 (PickMatch(origin, forward, 1)); 无匹配返回 nullopt
+//3. 在缓存中取循环序第 count 个匹配 (PickMatch, 取模定位); 无匹配返回 nullopt
 std::optional<Position> SearchEngine::Commit(const Buffer& buffer, const std::string& pattern,
-                                             bool forward, Position origin) {
+                                             bool forward, Position origin,
+                                             std::optional<std::size_t> count) {
     if (!pattern.empty()) {
         pattern_ = pattern;
         has_pattern_ = true;
@@ -24,7 +24,7 @@ std::optional<Position> SearchEngine::Commit(const Buffer& buffer, const std::st
         RebuildMatches(buffer);
     }
     forward_ = forward;
-    auto pos = PickMatch(origin, forward, 1);
+    auto pos = PickMatch(origin, forward, count.value_or(1));
     return pos;
 }
 

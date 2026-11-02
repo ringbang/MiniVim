@@ -119,10 +119,10 @@ void Editor::Execute(const EditorAction& action) {
         message_.clear();
         return;
     case ActionKind::EnterSearchForward:
-        EnterSearch(true);
+        EnterSearch(true, action.count_);
         return;
     case ActionKind::EnterSearchBackward:
-        EnterSearch(false);
+        EnterSearch(false, action.count_);
         return;
     case ActionKind::SearchNext: {
         //n/[count]n: 按上次方向取第 count 个匹配; 失败时光标与视口不动
@@ -242,35 +242,49 @@ void Editor::HandleCommandLine(KeyEvent key) {
 }
 
 //进入搜索输入模式 (/ 或 ?): 正文与光标保持静止, 底部显示 / 或 ? 加输入内容
-void Editor::EnterSearch(bool forward) {
+void Editor::EnterSearch(bool forward, std::optional<size_t> count) {
     mode_ = Mode::Search;
     search_input_.clear();
     search_direction_ = forward;
+    search_count_ = count;
     message_.clear();
 }
 
 void Editor::LeaveSearch() {
     //回到 Normal 模式, 丢弃正在输入的内容 (搜索记录由 SearchEngine 管理, 这里不碰)
     search_input_.clear();
+    search_count_.reset();
     mode_ = Mode::Normal;
 }
 
 void Editor::HandleSearch(KeyEvent key) {
-    //README:1097 只响应可打印 ASCII (/、?、反斜杠都是普通字符), 忽略其他控制键 (不支持 <BS>)
+    //README:1097 只响应可打印 ASCII (/、?、反斜杠都是普通字符), 其余控制键忽略,
+    //但 <BS> 支持编辑输入框 (测试点 101 "input editing", 与 OJ 参考一致)
     //<CR> 提交搜索, <Esc> 打断并完全恢复进入前的位置 (输入期间光标本就没动, 不修改搜索记录)
     if (key.code_ == KeyCode::Escape) {
         LeaveSearch();
         return;
     }
     if (key.code_ == KeyCode::Enter) {
-        //提交: 非空串保存串与方向 (即使本次找不到); 空串复用旧串 + 本次方向, 没有旧串则失败
-        auto target = search_engine_.Commit(buffer_, search_input_, search_direction_, window_.GetCursor());
+        //提交: 非空串保存串与方向 (即使本次找不到); 空串复用旧串 + 本次方向, 没有旧串则失败;
+        //[count]/ [count]? 取循环序第 count 个匹配 (测试点 113/114)
+        auto target = search_engine_.Commit(buffer_, search_input_, search_direction_,
+                                            window_.GetCursor(), search_count_);
         LeaveSearch();
         if (target) {
             window_.JumpTo(buffer_, *target); //成功: 光标停在匹配的第一个字符
         } else {
             message_ = "Pattern not found"; //TODO: 与 OJ 参考实现的提示文本核对, 必要时调整
         }
+        return;
+    }
+    if (key.code_ == KeyCode::Backspace) {
+        if (!search_input_.empty()) search_input_.pop_back();
+        else LeaveSearch(); // 空提示按 <BS> 取消搜索 (Vim 与通过 OJ 的旁证实现一致, 测试点 101/105 "cancellation and empty prompt")
+        return;
+    }
+    if (key.code_ == KeyCode::Delete) {
+        if (search_input_.empty()) LeaveSearch(); // 空提示按 <DEL> 取消搜索; 光标恒在末尾, 非空时 DEL 无效果 (与 Vim 一致)
         return;
     }
     if (key.code_ == KeyCode::Character && IsPrintable(key.value_)) {

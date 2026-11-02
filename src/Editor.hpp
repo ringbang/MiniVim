@@ -53,7 +53,8 @@ private:
 
     //ProcessKey的下属函数之一,Editor在搜索输入模式下对于KeyEvent的处理逻辑
     //(/ 或 ? 打开的输入框; 输入期间正文与光标静止, <CR> 提交搜索, <Esc> 打断)
-    void EnterSearch(bool forward);
+    //count: [count]/ [count]? 取该方向循环序第 count 个匹配 (测试点 113/114)
+    void EnterSearch(bool forward, std::optional<size_t> count = std::nullopt);
     void LeaveSearch();
     void HandleSearch(KeyEvent key);
 
@@ -71,6 +72,7 @@ private:
     std::string message_; //底部的提示或错误信息
     std::string search_input_; //搜索输入框的内容,不含前缀 / 或 ?
     bool search_direction_{true}; //本次搜索输入的方向: true = / 向前
+    std::optional<size_t> search_count_; //[count]/ 或 [count]? 的 count
     bool running_{true}; //设为false后结束主循环
 };
 
