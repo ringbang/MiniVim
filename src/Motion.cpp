@@ -215,9 +215,9 @@ Position PrevWordEnd(const Buffer& buffer, Position pos, bool cap) {
 // ---- 光标的移动(二): 括号匹配的辅助函数 (定义见文件末尾) ----
 
 //全文件计算"双引号状态": quote[i] = 处理到第 i 个字符时是否处于双引号字符串内 (跨行累计, 字符串可跨行).
-//  字符串外未被转义的 " 开启字符串, 字符串内未被转义的 " 关闭字符串;
-//  字符串内的 \ 转义它后面的一个字符 (所以 \" 不关闭字符串);
-//  字符串外的 \" 视为被转义的引号, 不开启字符串 (应对 README "反斜杠也参与筛选").
+//  字符串外: 任意 " 开启字符串 (反斜杠在字符串外是普通字符, 不转义引号也不转义括号);
+//  字符串内: \ 转义同一行的下一个字符 (所以 \" 不关闭字符串), 未被转义的 " 关闭字符串.
+//  README "反斜杠也参与筛选" 只作用于字符串内的引号配对, 这是测试点 88 的结论.
 std::vector<char> BuildQuoteState(const Buffer& buffer);
 
 //在 origin 所在行从 origin.column_ 起 (含) 向右找第一个 ()[]{} 括号字符; 没有返回 nullopt.
@@ -227,8 +227,8 @@ std::optional<Position> FindBracketCandidate(const Buffer& buffer, Position orig
 //从 start 出发找配对括号: depth 从 1 起, 从 start 的前/后一个位置扫描,
 //遇同型开括号 (open) 加 1, 同型闭括号 (close) 减 1, 减到 0 即配对; 其他种类括号不影响深度.
 //forward = true 向右扫描 (候选是开括号), false 向左 (候选是闭括号); 找不到返回 nullopt.
-//双引号字符串内的括号跳过 (quote 数组判定); 字符串外被奇数个连续反斜杠紧邻的括号视为被转义, 不参与计数.
-//起始括号自身始终作为 depth 的种子, 不检查它的引号/转义状态.
+//双引号字符串内的括号跳过 (quote 数组判定); 字符串外的反斜杠是普通字符, 括号照常计数.
+//起始括号自身始终作为 depth 的种子, 不检查它的引号状态.
 std::optional<Position> ScanBracketMatch(const Buffer& buffer, const std::vector<char>& quote,
                                          Position start, char open, char close, bool forward);
 
@@ -575,15 +575,9 @@ std::vector<char> BuildQuoteState(const Buffer& buffer) {
                 }
             } else {
                 quote[line_offset[row] + col] = 0;
+                // 字符串外反斜杠是普通字符: 任何 " 都开启字符串 (测试点 88)
                 if (c == '"') {
-                    // 数紧邻的前导反斜杠: 奇数个 → 被转义, 不开串
-                    size_t backslashes = 0;
-                    for (size_t j = col; j > 0 && line[j - 1] == '\\'; --j) {
-                        ++backslashes;
-                    }
-                    if (backslashes % 2 == 0) {
-                        in_string = true;
-                    }
+                    in_string = true;
                 }
             }
         }
@@ -610,17 +604,8 @@ std::optional<Position> ScanBracketMatch(const Buffer& buffer, const std::vector
     auto in_string = [&](const Position& pos) {
         return quote[line_offset[pos.row_] + pos.column_] != 0;
     };
-    // 数 pos 左边紧邻的连续反斜杠 (文本序, 与扫描方向无关): 奇数个 → 括号被转义
-    auto escaped = [&](const Position& pos) {
-        const std::string& line = buffer.GetLineAt(pos.row_);
-        size_t count = 0;
-        for (size_t j = pos.column_; j > 0 && line[j - 1] == '\\'; --j) {
-            ++count;
-        }
-        return count % 2 == 1;
-    };
 
-    size_t depth = 1; // start 自身是 depth 种子, 不检查它的引号/转义状态
+    size_t depth = 1; // start 自身是 depth 种子, 不检查它的引号状态
     // 沿扫描方向"更内层"的括号加深, 回到 depth 0 的括号即配对:
     // 向前 (候选是开括号): 开括号 ++, 闭括号 --; 向后 (候选是闭括号) 正好相反
     char inc = forward ? open : close;
@@ -636,14 +621,12 @@ std::optional<Position> ScanBracketMatch(const Buffer& buffer, const std::vector
             continue; // 双引号字符串内的括号跳过
         }
         if (c == inc) {
-            if (!escaped(pos)) ++depth;
+            ++depth;
         } else if (c == dec) {
-            if (!escaped(pos)) {
-                --depth;
-                if (depth == 0) return pos;
-            }
+            --depth;
+            if (depth == 0) return pos;
         }
-        // 其他种类的括号不影响深度
+        // 其他种类的括号不影响深度 (README:1123)
     }
     return std::nullopt;
 }
