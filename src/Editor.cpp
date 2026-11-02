@@ -47,7 +47,7 @@ void Editor::RefreshScreen() {
     window_.Resize(terminal_size);
     window_.EnsureCursorVisible(buffer_);
     //2. 把当前模式、命令和提示打包成 RenderState
-    RenderState states = {mode_, command_, message_};
+    RenderState states = {mode_, command_, message_, search_input_, search_direction_};
     //3. 让 Renderer 生成一帧字符串, 再交给 Terminal 输出
     std::string display_text = renderer_.Render(buffer_, window_, states);
     //这里是你唯一需要调用 Terminal 中的接口的地方, 请调用 WriteOutput
@@ -67,6 +67,10 @@ void Editor::ProcessKey(KeyEvent key) {
     } 
     if (mode_ == Mode::CommandLine) {
         HandleCommandLine(key);
+        return;
+    }
+    if (mode_ == Mode::Search) {
+        HandleSearch(key);
         return;
     }
     //3. Normal 模式下清除旧提示, 将按键交给 parser, 再执行生成的 Action
@@ -113,6 +117,37 @@ void Editor::Execute(const EditorAction& action) {
         //记得清空当前的message之类的遗留状态
         command_.clear();
         message_.clear();
+        return;
+    case ActionKind::EnterSearchForward:
+        EnterSearch(true);
+        return;
+    case ActionKind::EnterSearchBackward:
+        EnterSearch(false);
+        return;
+    case ActionKind::SearchNext: {
+        //n/[count]n: 按上次方向取第 count 个匹配; 失败时光标与视口不动
+        auto target = search_engine_.Repeat(buffer_, true, action.count_, window_.GetCursor());
+        if (target) window_.JumpTo(buffer_, *target);
+        else message_ = "Pattern not found"; //TODO: 与 OJ 参考实现的提示文本核对, 必要时调整
+        return;
+    }
+    case ActionKind::SearchPrev: {
+        //N/[count]N: 按上次方向的反方向
+        auto target = search_engine_.Repeat(buffer_, false, action.count_, window_.GetCursor());
+        if (target) window_.JumpTo(buffer_, *target);
+        else message_ = "Pattern not found"; //TODO: 同上
+        return;
+    }
+    case ActionKind::MarkSet:
+        //m{a-z}: 把当前光标保存为标记, 同名覆盖; 非法字符由 parser 拦截
+        if (action.arg_) buffer_.SetMark(*action.arg_, window_.GetCursor());
+        return;
+    case ActionKind::MarkJump:
+        //'a: 跳到标记的精确行列; 标记不存在时命令失败, 光标不动
+        if (action.arg_) {
+            auto mark = buffer_.GetMark(*action.arg_);
+            if (mark) window_.JumpTo(buffer_, *mark);
+        }
         return;
     }
 }
@@ -174,6 +209,9 @@ void Editor::LeaveInsert() {
     if (cursor.column_ > 0) cursor.column_ -= 1;
     window_.SetCursor(buffer_, cursor, false);
     mode_ = Mode::Normal;
+    //插入期间 Buffer 已被修改, 搜索匹配缓存失效 (搜索串与方向保留);
+    //后续 Normal 模式的编辑命令 (x/d/p 等) 也要在修改 Buffer 后调用 Invalidate
+    search_engine_.Invalidate();
 }
 
 
@@ -199,6 +237,44 @@ void Editor::HandleCommandLine(KeyEvent key) {
     // 可打印字符追加到末尾
     if (key.code_ == KeyCode::Character && IsPrintable(key.value_)) {
         command_.push_back(key.value_);
+        return;
+    }
+}
+
+//进入搜索输入模式 (/ 或 ?): 正文与光标保持静止, 底部显示 / 或 ? 加输入内容
+void Editor::EnterSearch(bool forward) {
+    mode_ = Mode::Search;
+    search_input_.clear();
+    search_direction_ = forward;
+    message_.clear();
+}
+
+void Editor::LeaveSearch() {
+    //回到 Normal 模式, 丢弃正在输入的内容 (搜索记录由 SearchEngine 管理, 这里不碰)
+    search_input_.clear();
+    mode_ = Mode::Normal;
+}
+
+void Editor::HandleSearch(KeyEvent key) {
+    //README:1097 只响应可打印 ASCII (/、?、反斜杠都是普通字符), 忽略其他控制键 (不支持 <BS>)
+    //<CR> 提交搜索, <Esc> 打断并完全恢复进入前的位置 (输入期间光标本就没动, 不修改搜索记录)
+    if (key.code_ == KeyCode::Escape) {
+        LeaveSearch();
+        return;
+    }
+    if (key.code_ == KeyCode::Enter) {
+        //提交: 非空串保存串与方向 (即使本次找不到); 空串复用旧串 + 本次方向, 没有旧串则失败
+        auto target = search_engine_.Commit(buffer_, search_input_, search_direction_, window_.GetCursor());
+        LeaveSearch();
+        if (target) {
+            window_.JumpTo(buffer_, *target); //成功: 光标停在匹配的第一个字符
+        } else {
+            message_ = "Pattern not found"; //TODO: 与 OJ 参考实现的提示文本核对, 必要时调整
+        }
+        return;
+    }
+    if (key.code_ == KeyCode::Character && IsPrintable(key.value_)) {
+        search_input_.push_back(key.value_);
         return;
     }
 }

@@ -28,6 +28,8 @@ std::optional<EditorAction> NormalModeParser::Feed(KeyEvent key) {
         return FeedCount(key.value_);
     case State::PrefixPending:
         return FeedPrefix(key.value_);
+    case State::CharPending:
+        return FeedChar(key.value_);
     default:
         //OperatorPending 等状态属于后续章节, 目前直接取消
         Reset();
@@ -61,6 +63,17 @@ std::optional<EditorAction> NormalModeParser::FeedNormal(char value) {
         //g 前缀, 等待第二个键 (ge/gE/gg); z 前缀 (zt/zz/zb) 在窗口操作章节复用本状态
         pending_prefix_ = 'g';
         state_ = State::PrefixPending;
+        return std::nullopt;
+    case '/': return GenerateCommand(ActionKind::EnterSearchForward);
+    case '?': return GenerateCommand(ActionKind::EnterSearchBackward);
+    case 'n': return GenerateCommand(ActionKind::SearchNext);
+    case 'N': return GenerateCommand(ActionKind::SearchPrev);
+    case '%': return GenerateMotion(Motion::MatchPercent);
+    case 'm':
+    case '\'':
+        //m/' 等一个字符 (m{a-z} / 'a), 具体字符由 FeedChar 收尾
+        pending_char_kind_ = (value == 'm') ? ActionKind::MarkSet : ActionKind::MarkJump;
+        state_ = State::CharPending;
         return std::nullopt;
     case 'i': return GenerateCommand(ActionKind::InsertBefore);
     case 'a': return GenerateCommand(ActionKind::InsertAfter);
@@ -101,6 +114,9 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
     case 'i': action = GenerateCommand(ActionKind::InsertBefore, pending_count_); break;
     case 'a': action = GenerateCommand(ActionKind::InsertAfter, pending_count_); break;
     case ':': action = GenerateCommand(ActionKind::EnterCommandLine, pending_count_); break;
+    case 'n': action = GenerateCommand(ActionKind::SearchNext, pending_count_); break;
+    case 'N': action = GenerateCommand(ActionKind::SearchPrev, pending_count_); break;
+    case '%': action = GenerateMotion(Motion::PercentLine, pending_count_); break;
     default:
         //不支持的键: 取消命令并丢弃该键
         action = std::nullopt;
@@ -126,6 +142,19 @@ std::optional<EditorAction> NormalModeParser::FeedPrefix(char value) {
     return action;
 }
 
+//CharPending 状态的收尾: m/'/r/f/t/q/@ 等"等一个字符"的命令.
+//目前只有 m/' (光标的移动二): value 为 a-z 时生成 MarkSet/MarkJump (arg_ = value),
+//否则取消整个命令 (与非法键一致); 后续章节的 r/f/t/q/@ 在这里扩展
+std::optional<EditorAction> NormalModeParser::FeedChar(char value) {
+    //TODO(光标的移动二): 实现
+    //1. pending_char_kind_ 有值且 'a' <= value <= 'z' 时构造 {kind = *pending_char_kind_, arg_ = value}
+    //   (注意先 Reset 再返回 action, 与 FeedCount/FeedPrefix 的做法一致)
+    //2. 其余情况 Reset 后返回 nullopt
+    (void)value;
+    Reset();
+    return std::nullopt;
+}
+
 EditorAction NormalModeParser::GenerateMotion(Motion motion, std::optional<size_t> count) {
     return {ActionKind::Move, MotionSpec{motion, count}, std::nullopt, std::nullopt, std::nullopt};
 }
@@ -141,6 +170,7 @@ void NormalModeParser::Reset() {
     pending_operator_.reset();
     pending_prefix_ = 0;
     pending_register_.reset();
+    pending_char_kind_.reset();
 }
 
 } // namespace sjtu

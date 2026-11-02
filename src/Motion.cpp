@@ -2,6 +2,7 @@
 
 #include <string>
 #include <algorithm>
+#include <vector>
 
 namespace sjtu {
 
@@ -211,6 +212,31 @@ Position PrevWordEnd(const Buffer& buffer, Position pos, bool cap) {
     return pos;
 }
 
+// ---- 光标的移动(二): 括号匹配的辅助函数 (定义见文件末尾) ----
+
+//全文件计算"双引号状态": quote[i] = 处理到第 i 个字符时是否处于双引号字符串内 (跨行累计, 字符串可跨行).
+//  字符串外未被转义的 " 开启字符串, 字符串内未被转义的 " 关闭字符串;
+//  字符串内的 \ 转义它后面的一个字符 (所以 \" 不关闭字符串);
+//  字符串外的 \" 视为被转义的引号, 不开启字符串 (应对 README "反斜杠也参与筛选").
+std::vector<char> BuildQuoteState(const Buffer& buffer);
+
+//在 origin 所在行从 origin.column_ 起 (含) 向右找第一个 ()[]{} 括号字符; 没有返回 nullopt.
+//按 README 字面理解: 候选选择不区分引号与转义, 只找括号字符.
+std::optional<Position> FindBracketCandidate(const Buffer& buffer, Position origin);
+
+//从 start 出发找配对括号: depth 从 1 起, 从 start 的前/后一个位置扫描,
+//遇同型开括号 (open) 加 1, 同型闭括号 (close) 减 1, 减到 0 即配对; 其他种类括号不影响深度.
+//forward = true 向右扫描 (候选是开括号), false 向左 (候选是闭括号); 找不到返回 nullopt.
+//双引号字符串内的括号跳过 (quote 数组判定); 字符串外被奇数个连续反斜杠紧邻的括号视为被转义, 不参与计数.
+//起始括号自身始终作为 depth 的种子, 不检查它的引号/转义状态.
+std::optional<Position> ScanBracketMatch(const Buffer& buffer, const std::vector<char>& quote,
+                                         Position start, char open, char close, bool forward);
+
+//行跳转命令 (G/gg/[count]%) 共用的目标行列定位: 第一个非空白字符;
+//行内全为空白 (空格+Tab, 与 ^ 的实测结论一致) 停在最后一个字符; 空行停在该行唯一位置.
+//G/gg 现在直接调用 ComputeFirstNonBlank 完成了同样的事情, 建议实现本函数后顺手把 G/gg 改为复用它.
+Position LineJumpTarget(const Buffer& buffer, std::size_t row);
+
 } // namespace
 
 MotionResult MotionEngine::Compute(const Buffer& buffer, Position origin,
@@ -253,6 +279,10 @@ MotionResult MotionEngine::Compute(const Buffer& buffer, Position origin,
         return ComputeGotoLine(buffer, origin, spec.count_);
     case Motion::GotoFirstLine:
         return ComputeGotoFirstLine(buffer, origin, spec.count_);
+    case Motion::MatchPercent:
+        return ComputeMatchPercent(buffer, origin);
+    case Motion::PercentLine:
+        return ComputePercentLine(buffer, origin, spec.count_);
     }
     return {};
 }
@@ -448,5 +478,62 @@ MotionResult MotionEngine::ComputeGotoFirstLine(const Buffer& buffer, Position o
     res.target_.column_ = ComputeFirstNonBlank(buffer, res.target_).target_.column_;
     return res;
 }
+
+//% (无 count): 当前行从光标 (含) 向右找第一个 ()[]{} (FindBracketCandidate), 再跳到其配对括号.
+//配对扫描跨行, 用同种括号的嵌套深度确定配对, 其他种类括号不影响深度 (README:1117).
+//候选没有配对时命令失败 (ok_ = false, 光标与视口不动), 不继续尝试下一个候选 (README:1127).
+//成功: 光标停在配对括号上, curswant = 其显示列 (SetToTarget), kind = CharacterwiseInclusive.
+//实现建议: 先 BuildQuoteState 一次; 候选是开括号则 ScanBracketMatch(forward=true),
+//闭括号则 ScanBracketMatch(forward=false).
+//TODO(光标的移动二): 实现
+MotionResult MotionEngine::ComputeMatchPercent(const Buffer& buffer, Position origin) {
+    (void)buffer;
+    (void)origin;
+    return {};
+}
+
+//[count]%: 跳到第 ceil(count * N / 100) 行 (N = 文件行数, 行号从 1 开始).
+//count 不在 [1,100] 内时失败 (ok_ = false); 用 (count * N + 99) / 100 避免浮点, count <= 100 不会溢出.
+//列定位与 G 相同 (LineJumpTarget): 即使目标行就是当前行也按规则重新定位 (README:1129).
+//完成后 curswant = 光标所在的显示列 (SetToTarget), kind = Linewise.
+//TODO(光标的移动二): 实现
+MotionResult MotionEngine::ComputePercentLine(const Buffer& buffer, Position origin, std::optional<size_t> count) {
+    (void)buffer;
+    (void)origin;
+    (void)count;
+    return {};
+}
+
+namespace {
+
+//TODO(光标的移动二): 实现 — 契约见文件中部匿名 namespace 里的声明注释
+std::vector<char> BuildQuoteState(const Buffer& buffer) {
+    (void)buffer;
+    return {};
+}
+
+std::optional<Position> FindBracketCandidate(const Buffer& buffer, Position origin) {
+    (void)buffer;
+    (void)origin;
+    return std::nullopt;
+}
+
+std::optional<Position> ScanBracketMatch(const Buffer& buffer, const std::vector<char>& quote,
+                                         Position start, char open, char close, bool forward) {
+    (void)buffer;
+    (void)quote;
+    (void)start;
+    (void)open;
+    (void)close;
+    (void)forward;
+    return std::nullopt;
+}
+
+Position LineJumpTarget(const Buffer& buffer, std::size_t row) {
+    (void)buffer;
+    return {row, 0};
+}
+
+} // namespace
 
 } // namespace sjtu

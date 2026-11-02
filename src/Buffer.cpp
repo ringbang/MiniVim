@@ -76,6 +76,9 @@ void Buffer::EraseCharacter(std::size_t row, std::size_t column) {
 
 void Buffer::SplitLine(std::size_t row, std::size_t column) {
     //在第 row 行第 col 列分割, 即在此处敲了回车键
+    //标记维护 (README 未规定切行, 按 vim: 标记跟随原字符):
+    //  标记在本行且 column >= 切分点 → 移到 (row+1, column - 切分点); 其余标记不动
+    //TODO(光标的移动二): 实现
     std::size_t row_length = lines_[row].size();
     if (column > row_length) throw std::runtime_error("Column out of range.");
     if (column == row_length) lines_.insert(lines_.begin() + row + 1, "");
@@ -92,6 +95,9 @@ void Buffer::SplitLine(std::size_t row, std::size_t column) {
 
 void Buffer::JoinLine(std::size_t row) {
     //把第 row + 1 行合并进第 row 行
+    //标记维护 (README 未规定合并, 按 vim: 标记跟随原字符):
+    //  标记在被合并行 row+1 → 移到 (row, 原 row 行长度 + 原列); row+1 以下的标记上移一行
+    //TODO(光标的移动二): 实现
     lines_[row] += lines_[row + 1];
     lines_.erase(lines_.begin() + row + 1);
     modified_ = true;
@@ -109,6 +115,85 @@ void Buffer::SaveAs(const std::filesystem::path& path) {
     Buffer::WriteTo(path);
     path_ = path;
     modified_ = false;
+}
+
+// ---- 标记 (README: 标记 m) ----
+
+//m{a-z}: 保存当前 Buffer 位置为小写局部标记, 同名标记被覆盖 (README:1143); name 非法时忽略
+void Buffer::SetMark(char name, Position pos) {
+    //TODO(光标的移动二): 实现
+    //1. name 不在 a-z 内直接返回
+    if (name < 'a' || name > 'z') {
+        return;
+    }
+    //2. marks_[name - 'a'] = pos; mark_valid_[name - 'a'] = true
+    marks_[name - 'a'] = pos;
+    mark_valid_[name - 'a'] = true;
+}
+
+//'a: 返回标记的精确行与字符位置; 标记未设置 (或 name 非法) 返回 nullopt (README:1143)
+std::optional<Position> Buffer::GetMark(char name) const {
+    //TODO(光标的移动二): 实现
+    //1. name 不在 a-z 内或 mark_valid_ 为 false 返回 nullopt
+    if (name < 'a' || name > 'z' || !mark_valid_[name - 'a']) {
+        return std::nullopt;
+    }
+    //2. 否则返回 marks_[name - 'a']
+    return marks_[name - 'a'];
+}
+
+//丢弃一个标记 (EraseLine 内部使用)
+void Buffer::ClearMark(char name) {
+    //TODO(光标的移动二): 实现
+    //name 合法时 mark_valid_[name - 'a'] = false
+    if (name >= 'a' && name <= 'z') {
+        mark_valid_[name - 'a'] = false;
+    }
+}
+
+//在 row 处插入一个空行 (后续 o/O 与粘贴章节的行插入入口); row 处及以下的标记整体下移一行
+void Buffer::InsertLine(std::size_t row) {
+    //TODO(光标的移动二): 实现
+    //1. 越界检查; 
+    if (row >= lines_.size()) {
+        throw std::runtime_error("Row out of range.");
+    }
+    // 在 lines_ 的 row 处插入空串, 并置 modified_ / end_with_newline_
+    lines_.insert(lines_.begin() + row, "");
+    modified_ = true;
+    end_with_newline_ = true;
+    //2. AdjustMarksInsertLine(row)
+    AdjustMarksInsertLine(row);
+}
+
+//删除第 row 行并返回其内容 (寄存器章节取文本用); 该行标记丢失, 其下标记上移一行
+std::string Buffer::EraseLine(std::size_t row) {
+    //TODO(光标的移动二): 实现
+    //1. 取出 lines_[row] 的内容作为返回值
+    const std::string &res = lines_[row];
+    //2. 删除该行并置 modified_ / end_with_newline_ (保持 Buffer 至少有一行, 全删光时留一个空行)
+    lines_.erase(lines_.begin() + row);
+    if (lines_.empty()) {
+        lines_.push_back("");
+    }
+    modified_ = true;
+    end_with_newline_ = true;
+    //3. AdjustMarksEraseLine(row)
+    AdjustMarksEraseLine(row);
+    return res;
+}
+
+void Buffer::AdjustMarksInsertLine(std::size_t row) {
+    //TODO(光标的移动二): 实现
+    //位置在 row 处及以下的标记整体下移一行 (README: 在标记位置及之前插入完整行, 标记随原文本后移)
+    (void)row;
+}
+
+void Buffer::AdjustMarksEraseLine(std::size_t row) {
+    //TODO(光标的移动二): 实现
+    //row 行上的标记全部丢失 (mark_valid_ = false, README: 标记所在行被删除则标记丢失);
+    //row 以下的标记上移一行
+    (void)row;
 }
 
 

@@ -22,6 +22,10 @@ struct Position {
     constexpr bool operator!=(const Position& other) const noexcept {
         return !(*this == other);
     }
+    //文本序比较 (先按行再按列), 搜索匹配缓存的二分查找使用
+    constexpr bool operator<(const Position& other) const noexcept {
+        return row_ < other.row_ || (row_ == other.row_ && column_ < other.column_);
+    }
 };
 
 struct ScreenSize {
@@ -46,6 +50,7 @@ enum class Mode {
     CommandLine,
     Visual,
     VisualLine,  // 新增 Visual 模式
+    Search,      // 搜索输入模式: / 或 ? 的输入框, 输入期间正文与光标静止
 };
 
 //Basic中支持的四个移动方向,可以由hjkl等按键生成
@@ -67,6 +72,8 @@ enum class Motion {
     LineEnd, // $
     GotoLine, // G
     GotoFirstLine, // gg
+    MatchPercent, // % 无 count: 跳到配对括号 (kind = CharacterwiseInclusive)
+    PercentLine,  // [count]%: 跳到第 ceil(count*N/100) 行 (kind = Linewise)
 };
 
 //motion 与其 count; parser 负责收集数字前缀并填入 count_

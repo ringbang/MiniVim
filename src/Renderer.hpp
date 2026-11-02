@@ -16,9 +16,12 @@ namespace sjtu {
 
 struct RenderState {
     //绘制底部一行所需的状态, command_ 不包含冒号, message_ 保存提示或错误信息
+    //search_ 是搜索输入框的内容 (不含前缀), search_forward_ 决定前缀是 / 还是 ?
     Mode mode_{Mode::Normal};
     std::string command_;
     std::string message_;
+    std::string search_;
+    bool search_forward_{true};
 };
 
 class Renderer {

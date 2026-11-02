@@ -12,6 +12,7 @@ Editor负责协调各个模块,保存当前模式,并根据输入调用Buffer和
 #include "Buffer.hpp"
 #include "Command.hpp"
 #include "Renderer.hpp"
+#include "Search.hpp"
 #include "Terminal.hpp"
 #include "Types.hpp"
 #include "Window.hpp"
@@ -50,6 +51,12 @@ private:
     void ExecuteCommandLine();
     void LeaveCommandLine();
 
+    //ProcessKey的下属函数之一,Editor在搜索输入模式下对于KeyEvent的处理逻辑
+    //(/ 或 ? 打开的输入框; 输入期间正文与光标静止, <CR> 提交搜索, <Esc> 打断)
+    void EnterSearch(bool forward);
+    void LeaveSearch();
+    void HandleSearch(KeyEvent key);
+
     bool SaveBuffer(const std::filesystem::path& path = {});
 
     Buffer buffer_; //文件的实际内容
@@ -57,10 +64,13 @@ private:
     Window window_; //光标和当前可见区域
     Renderer renderer_; //根据内容和状态生成要输出的画面
     NormalModeParser normal_parser_; //把Normal模式的按键转换成EditorAction
+    SearchEngine search_engine_; // / ? n N 的搜索串、方向与匹配缓存
 
     Mode mode_{Mode::Normal}; //当前编辑模式
     std::string command_; //命令行模式下已经输入的内容,不含开头的冒号
     std::string message_; //底部的提示或错误信息
+    std::string search_input_; //搜索输入框的内容,不含前缀 / 或 ?
+    bool search_direction_{true}; //本次搜索输入的方向: true = / 向前
     bool running_{true}; //设为false后结束主循环
 };
 

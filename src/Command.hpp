@@ -39,6 +39,10 @@ enum class ActionKind {
     EnterVisual,
     EnterVisualLine,
     Scroll,
+    EnterSearchForward,  // / : 进入向前搜索输入框
+    EnterSearchBackward, // ? : 进入向后搜索输入框
+    SearchNext,          // n / [count]n: 按上次方向重复搜索
+    SearchPrev,          // N / [count]N: 按上次方向的反方向重复搜索
     //在Advanced部分中你很可能需要添加别的ActionKind
 };
 
@@ -73,10 +77,12 @@ private:
     EditorAction GenerateMotion(Motion motion, std::optional<size_t> count = std::nullopt);
     EditorAction GenerateCommand(ActionKind kind, std::optional<size_t> count = std::nullopt);
 
-    //Feed 按当前状态分发的三个子函数; 返回 nullopt 表示命令尚未完成或已取消
+    //Feed 按当前状态分发的子函数; 返回 nullopt 表示命令尚未完成或已取消
     std::optional<EditorAction> FeedNormal(char value);
     std::optional<EditorAction> FeedCount(char value);
     std::optional<EditorAction> FeedPrefix(char value);
+    //CharPending 状态的收尾: m/'/r/f/t/q/@ 等"等一个字符"的命令; 目前只有 m/' (光标的移动二)
+    std::optional<EditorAction> FeedChar(char value);
 
     enum class State {
         Normal,
@@ -91,7 +97,8 @@ private:
     std::optional<size_t> pending_count_;
     std::optional<ActionKind> pending_operator_;
     char pending_prefix_{0};
-    std::optional<char> pending_register_;    
+    std::optional<char> pending_register_;
+    std::optional<ActionKind> pending_char_kind_; // CharPending 状态要生成的动作 (目前是 MarkSet/MarkJump)    
 };
 
 } // namespace sjtu

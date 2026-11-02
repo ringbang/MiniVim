@@ -51,8 +51,13 @@ private:
     static MotionResult ComputeGotoLine(const Buffer& buffer, Position origin, std::optional<size_t> count);     // G
     static MotionResult ComputeGotoFirstLine(const Buffer& buffer, Position origin, std::optional<size_t> count);// gg
 
+    // ---- 光标的移动(二) ----
+    static MotionResult ComputeMatchPercent(const Buffer& buffer, Position origin); // % 无 count: 括号匹配
+    static MotionResult ComputePercentLine(const Buffer& buffer, Position origin, std::optional<size_t> count); // [count]%: 跳到第 ceil(count*N/100) 行
+
     // ---- 后续章节扩展点 ----
-    // 搜索 (/,?,n,N)、文本对象 (a/i + 对象字符) 等在此扩展; 文本对象建议直接产出 Range
+    // 文本对象 (a/i + 对象字符) 等在此扩展, 文本对象建议直接产出 Range;
+    // 搜索 (/,?,n,N) 有状态与记忆化缓存, 由独立的 SearchEngine 提供, 不经过本类
 };
 
 } // namespace sjtu

@@ -24,6 +24,9 @@ public:
 
     // allow_line_end 为 true 时允许停在最后一个字符之后, 供插入模式使用
     void SetCursor(const Buffer& buffer, Position position, bool allow_line_end);
+    //搜索/标记/跳转类命令共用的"直接落到指定位置": 按 Normal 范围钳制行列,
+    //更新 curswant 为落地字符的显示列 (落在 Tab 上时取 Tab 的最后一格, 与 SetToTarget 一致), 并保证光标可见
+    void JumpTo(const Buffer& buffer, Position position);
     const Position& GetCursor() const ;
     const Viewport& GetViewport() const ;
 

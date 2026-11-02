@@ -122,6 +122,15 @@ void Window::SetCursor(const Buffer& buffer, Position position, bool allow_line_
 }
 
 
+//搜索/标记等跳转命令的通用入口: 钳制行列后更新光标与 curswant (见 Window.hpp 的说明)
+void Window::JumpTo(const Buffer& buffer, Position position) {
+    //TODO(光标的移动二): 实现
+    //与 SetCursor(buffer, position, false) 类似 (钳制行号与列号 + EnsureCursorVisible),
+    //但 curswant 用 CursorCellColumn 计算 (落在 Tab 上取 Tab 的最后一格, SetToTarget 语义)
+    (void)buffer;
+    (void)position;
+}
+
 void Window::MoveLeft(const Buffer& buffer, std::size_t count) {
     //向左移动 count 个字符, 最多到行首, 并更新目标显示列
     if (count <= cursor_.column_) cursor_.column_ -= count;

@@ -58,6 +58,9 @@ std::string Renderer::Render(const Buffer& buffer, const Window& window, const R
     std::string bottom;
     if (state.mode_ == Mode::CommandLine) {
         bottom = ":" + state.command_;
+    } else if (state.mode_ == Mode::Search) {
+        //搜索输入框: 前缀 / 或 ? 加已输入的内容
+        bottom = (state.search_forward_ ? "/" : "?") + state.search_;
     } else if (!state.message_.empty()) {
         bottom = state.message_;
     } else if (state.mode_ == Mode::Insert) {
@@ -75,8 +78,12 @@ std::string Renderer::Render(const Buffer& buffer, const Window& window, const R
     if (state.mode_ == Mode::CommandLine) {
         cursor_row = viewport.rows_;
         cursor_column = state.command_.size() + 1; // 考虑冒号
-    }    
-
+    }
+    // 搜索输入模式
+    else if (state.mode_ == Mode::Search) {
+        cursor_row = viewport.rows_;
+        cursor_column = state.search_.size() + 1; // 考虑前缀 / 或 ?
+    }
     // 其他模式
     else {
         const std::string& text_line = buffer.GetLineAt(window.GetCursor().row_);
