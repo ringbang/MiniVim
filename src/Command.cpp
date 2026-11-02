@@ -117,6 +117,13 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
     case 'n': action = GenerateCommand(ActionKind::SearchNext, pending_count_); break;
     case 'N': action = GenerateCommand(ActionKind::SearchPrev, pending_count_); break;
     case '%': action = GenerateMotion(Motion::PercentLine, pending_count_); break;
+    case 'm':
+    case '\'':
+        //count 对 m/' 无效, 按"忽略 count"处理 (测试点 93/96), 与 FeedNormal 一样进入 CharPending;
+        //pending_count_ 保留到 FeedChar 收尾时一并清掉, 值本身被忽略
+        pending_char_kind_ = (value == 'm') ? ActionKind::MarkSet : ActionKind::MarkJump;
+        state_ = State::CharPending;
+        return std::nullopt;
     default:
         //不支持的键: 取消命令并丢弃该键
         action = std::nullopt;
@@ -146,10 +153,7 @@ std::optional<EditorAction> NormalModeParser::FeedPrefix(char value) {
 //目前只有 m/' (光标的移动二): value 为 a-z 时生成 MarkSet/MarkJump (arg_ = value),
 //否则取消整个命令 (与非法键一致); 后续章节的 r/f/t/q/@ 在这里扩展
 std::optional<EditorAction> NormalModeParser::FeedChar(char value) {
-    //TODO(光标的移动二): 实现
-    //1. pending_char_kind_ 有值且 'a' <= value <= 'z' 时构造 {kind = *pending_char_kind_, arg_ = value}
-    //   (注意先 Reset 再返回 action, 与 FeedCount/FeedPrefix 的做法一致)
-    if (pending_char_kind_ && value >= 'a' && value <= 'z' ) {
+    if (pending_char_kind_ && value >= 'a' && value <= 'z') {
         EditorAction act;
         act.kind_ = *pending_char_kind_;
         act.arg_ = value;

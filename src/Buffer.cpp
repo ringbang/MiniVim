@@ -103,13 +103,21 @@ void Buffer::SplitLine(std::size_t row, std::size_t column) {
 
 void Buffer::JoinLine(std::size_t row) {
     //把第 row + 1 行合并进第 row 行
-    //标记维护 (README 未规定合并, 按 vim: 标记跟随原字符):
-    //  标记在被合并行 row+1 → 移到 (row, 原 row 行长度 + 原列); row+1 以下的标记上移一行
+    //标记维护 (README 未规定合并; OJ 实测):
+    //  被合并行有字符 → 标记跟随到 (row, 原 row 行长度 + 原列) (测试点 142);
+    //  被合并行为空行 → 该行标记丢失 (空行没有字符可跟随, 测试点 143/144);
+    //  row+1 以下的标记上移一行
+    bool merged_empty = lines_[row + 1].empty();
     for (size_t i = 0; i < kMarkCount; i++) {
-        if (mark_valid_[i] && marks_[i].row_ >= row + 1) {
-            if (marks_[i].row_ == row + 1) {
+        if (!mark_valid_[i]) continue;
+        if (marks_[i].row_ == row + 1) {
+            if (merged_empty) {
+                mark_valid_[i] = false;
+            } else {
                 marks_[i].column_ += lines_[row].size();
+                marks_[i].row_ = row;
             }
+        } else if (marks_[i].row_ > row + 1) {
             marks_[i].row_--;
         }
     }
