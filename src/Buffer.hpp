@@ -32,6 +32,29 @@ public:
     void Save();
     void SaveAs(const std::filesystem::path& path);
 
+    // ---- 文本的修正与移动(一) ----
+    //保证 Buffer 至少有一行 (README:1469 提到的 EnsureNonEmpty: 行被全部删光时保留一个空行)
+    void EnsureNonEmpty();
+    //删除 range 覆盖的文本并返回被删除文本 (供 d/c 写 register):
+    //  Linewise: 完整行, 行间用 '\n' 连接 (README:1471 的类型语义);
+    //  Characterwise: 含/不含终点字符按 kind 判定, 可跨行 (课程简化: 不自动转换行尾, README:889);
+    //  标记维护走已有原语 (EraseCharacter/JoinLine/EraseLine 各自维护);
+    //  删除后调用 EnsureNonEmpty. 修改 modified_ 与 end_with_newline_ (README:1247).
+    std::string EraseRange(const Range& range);
+    //[count]r: 把 (row, column) 起的 count 个字符替换为 value (不跨行);
+    //调用方保证 column + count <= 行长 (不足时命令整体失败的语义由调用方先行检查, README:1501).
+    //替换字符会置 modified_ (即使与原字符相同, README:1507).
+    void ReplaceCharacters(std::size_t row, std::size_t column, std::size_t count, char value);
+    //~: 翻转一个字符的 ASCII 大小写 (A-Z <-> a-z); 非字母不变.
+    //返回"是否真正翻转了字母"; 只有翻转了才置 modified_ (README:1551: 全是非字母不算修改).
+    bool FlipCaseCharacter(std::size_t row, std::size_t column);
+    //J 的一步拼接 (README:1523): 删除 row 与 row+1 之间的换行, 去掉下一行前导空格/Tab;
+    //  去前导空白后下一行为空 → 不加空格;
+    //  否则若累计结果非空、末尾不是空格/Tab、且下一行第一个字符不是 ')' → 加一个空格;
+    //  拼接剩余内容 (保留累计结果原有尾部空白).
+    //标记维护与 JoinLine 相同 (被合并行标记只上移行号/空行失效).
+    void JoinForJ(std::size_t row);
+
     // ---- 标记 (README: 标记 m) ----
     //m{a-z}: 保存当前 Buffer 位置为小写局部标记, 同名标记被覆盖; name 不在 a-z 内时忽略
     void SetMark(char name, Position pos);

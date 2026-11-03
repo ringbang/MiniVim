@@ -119,6 +119,67 @@ void Buffer::JoinLine(std::size_t row) {
     return;
 }
 
+// ---- 文本的修正与移动(一) ----
+
+//保证 Buffer 至少有一行 (契约见 Buffer.hpp 的注释)
+//TODO(文本的修正与移动一): 实现
+//1. lines_.empty() 时 push_back(""), 不因此置 modified_
+void Buffer::EnsureNonEmpty() {
+}
+
+//删除 range 覆盖的文本并返回被删除文本 (契约见 Buffer.hpp 的注释)
+//TODO(文本的修正与移动一): 实现
+//1. Linewise: 循环 EraseLine(begin.row_) (每删一行后该下标又是下一行), 拼接返回值,
+//   行间加 '\n'; 循环 end - begin + 1 次; 最后 EnsureNonEmpty
+//2. Characterwise 同行: 从后往前 EraseCharacter 删除 [begin, end) (Inclusive 时含 end),
+//   收集字符组成返回串
+//3. Characterwise 跨行: 收集首行尾部 + '\n' + 中间完整行 (EraseLine) + '\n' + 末行头部,
+//   删除中间行后 JoinLine(begin.row_) 合并首尾两行
+//4. 置 modified_ = true; end_with_newline_ = true (README:1247)
+std::string Buffer::EraseRange(const Range& range) {
+    (void)range;
+    return {};
+}
+
+//[count]r 替换 (契约见 Buffer.hpp 的注释)
+//TODO(文本的修正与移动一): 实现
+//1. 循环 count 次: lines_[row][column + i] = value
+//2. modified_ = true
+void Buffer::ReplaceCharacters(std::size_t row, std::size_t column, std::size_t count, char value) {
+    (void)row;
+    (void)column;
+    (void)count;
+    (void)value;
+}
+
+//~ 翻转一个字符 (契约见 Buffer.hpp 的注释)
+//TODO(文本的修正与移动一): 实现
+//1. 'a'-'z' 与 'A'-'Z' 互换; 其他字符原样
+//2. 只有真正翻转了字母才置 modified_ = true
+bool Buffer::FlipCaseCharacter(std::size_t row, std::size_t column) {
+    char &c = lines_[row][column];
+    if (c >= 'a' && c <= 'z') {
+        c = 'A' + (c - 'a');
+        modified_ = true;
+        return true;
+    }
+    if (c >= 'A' && c <= 'Z') {
+        c = 'a' + (c - 'A');
+        modified_ = true;
+        return true;
+    }
+    return false;
+}
+
+//J 的一步拼接 (契约见 Buffer.hpp 的注释)
+//TODO(文本的修正与移动一): 实现
+//1. 标记维护: 与 JoinLine 相同 (被合并行标记只上移行号; 被合并行为空行则标记失效)
+//2. 按 README:1523 的四条规则处理前导空白与分隔空格, 拼接
+//3. 置 modified_ = true; end_with_newline_ = true
+void Buffer::JoinForJ(std::size_t row) {
+    (void)row;
+}
+
 void Buffer::Save() {
     //把文件内容保存, 直接调用 WriteTo 方法
     Buffer::WriteTo(path_);

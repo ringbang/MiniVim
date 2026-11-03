@@ -30,8 +30,13 @@ std::optional<EditorAction> NormalModeParser::Feed(KeyEvent key) {
         return FeedPrefix(key.value_);
     case State::CharPending:
         return FeedChar(key.value_);
+    case State::OperatorPending:
+        return FeedOperator(key.value_);
+    case State::OperatorCount:
+        return FeedOperatorCount(key.value_);
+    case State::OperatorPrefixPending:
+        return FeedOperatorPrefix(key.value_);
     default:
-        //OperatorPending 等状态属于后续章节, 目前直接取消
         Reset();
         return std::nullopt;
     }
@@ -76,6 +81,26 @@ std::optional<EditorAction> NormalModeParser::FeedNormal(char value) {
         pending_char_kind_ = (value == 'm') ? ActionKind::MarkSet : ActionKind::MarkJump;
         state_ = State::CharPending;
         return std::nullopt;
+    case 'd':
+    case 'c':
+        //operator 前缀: 等待 motion (含 dd/cc 与 D/C)
+        pending_operator_ = (value == 'd') ? ActionKind::Delete : ActionKind::Change;
+        state_ = State::OperatorPending;
+        return std::nullopt;
+    case 'x': return GenerateCommand(ActionKind::DeleteCharForward);
+    case 'X': return GenerateCommand(ActionKind::DeleteCharBackward);
+    case 'D': return GenerateOperator(ActionKind::Delete, Motion::LineEnd);  // D = d$
+    case 'C': return GenerateOperator(ActionKind::Change, Motion::LineEnd);  // C = c$
+    case 'I': return GenerateCommand(ActionKind::EnterInsertLineStart);
+    case 'A': return GenerateCommand(ActionKind::EnterInsertLineEnd);
+    case 'o': return GenerateCommand(ActionKind::EnterInsertBelow);
+    case 'O': return GenerateCommand(ActionKind::EnterInsertAbove);
+    case 'r':
+        pending_char_kind_ = ActionKind::ReplaceChar;
+        state_ = State::CharPending;
+        return std::nullopt;
+    case 'J': return GenerateCommand(ActionKind::JoinLines);
+    case '~': return GenerateCommand(ActionKind::FlipCase);
     case 'i': return GenerateCommand(ActionKind::InsertBefore);
     case 'a': return GenerateCommand(ActionKind::InsertAfter);
     case ':': return GenerateCommand(ActionKind::EnterCommandLine);
@@ -127,6 +152,28 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
         return std::nullopt;
     case '/': action = GenerateCommand(ActionKind::EnterSearchForward, pending_count_); break;
     case '?': action = GenerateCommand(ActionKind::EnterSearchBackward, pending_count_); break;
+    case 'd':
+    case 'c':
+        //operator 前缀带 count: 保存为 operator count, 等待 motion
+        pending_operator_ = (value == 'd') ? ActionKind::Delete : ActionKind::Change;
+        pending_operator_count_ = pending_count_;
+        pending_count_.reset();
+        state_ = State::OperatorPending;
+        return std::nullopt; // 注意不走下面的 Reset
+    case 'x': action = GenerateCommand(ActionKind::DeleteCharForward, pending_count_); break;
+    case 'X': action = GenerateCommand(ActionKind::DeleteCharBackward, pending_count_); break;
+    case 'D': action = GenerateOperator(ActionKind::Delete, Motion::LineEnd, pending_count_); break; // [count]D = [count]d$
+    case 'C': action = GenerateOperator(ActionKind::Change, Motion::LineEnd, pending_count_); break; // [count]C = [count]c$
+    case 'I': action = GenerateCommand(ActionKind::EnterInsertLineStart, pending_count_); break;
+    case 'A': action = GenerateCommand(ActionKind::EnterInsertLineEnd, pending_count_); break;
+    case 'o': action = GenerateCommand(ActionKind::EnterInsertBelow, pending_count_); break;
+    case 'O': action = GenerateCommand(ActionKind::EnterInsertAbove, pending_count_); break;
+    case 'r':
+        pending_char_kind_ = ActionKind::ReplaceChar;
+        state_ = State::CharPending;
+        return std::nullopt; // count 保留给 FeedChar 收尾时取用
+    case 'J': action = GenerateCommand(ActionKind::JoinLines, pending_count_); break;
+    case '~': action = GenerateCommand(ActionKind::FlipCase, pending_count_); break;
     default:
         //不支持的键: 取消命令并丢弃该键
         action = std::nullopt;
@@ -156,6 +203,22 @@ std::optional<EditorAction> NormalModeParser::FeedPrefix(char value) {
 //目前只有 m/' (光标的移动二): value 为 a-z 时生成 MarkSet/MarkJump (arg_ = value),
 //否则取消整个命令 (与非法键一致); 后续章节的 r/f/t/q/@ 在这里扩展
 std::optional<EditorAction> NormalModeParser::FeedChar(char value) {
+    //r 收尾 (先于 m/` 判断, 因为 r 的 {char} 也可能是 a-z):
+    //{char} 必须是可打印 ASCII (0x20-0x7e), 否则取消整个命令 (README:1511);
+    //[count]r 的 count 由 pending_count_ 带入动作
+    if (pending_char_kind_ && *pending_char_kind_ == ActionKind::ReplaceChar) {
+        if (value >= 0x20 && value <= 0x7e) {
+            EditorAction act;
+            act.kind_ = ActionKind::ReplaceChar;
+            act.count_ = pending_count_;
+            act.arg_ = value;
+            Reset();
+            return act;
+        }
+        Reset();
+        return std::nullopt;
+    }
+    //m/` 收尾: 要求 a-z
     if (pending_char_kind_ && value >= 'a' && value <= 'z') {
         EditorAction act;
         act.kind_ = *pending_char_kind_;
@@ -163,7 +226,7 @@ std::optional<EditorAction> NormalModeParser::FeedChar(char value) {
         Reset();
         return act;
     }
-    //2. 其余情况 Reset 后返回 nullopt
+    //其余情况 Reset 后返回 nullopt (取消并丢弃)
     Reset();
     return std::nullopt;
 }
@@ -177,6 +240,11 @@ EditorAction NormalModeParser::GenerateCommand(ActionKind kind, std::optional<si
     return {kind, std::nullopt, count, std::nullopt, std::nullopt};
 }
 
+EditorAction NormalModeParser::GenerateOperator(ActionKind kind, Motion motion, std::optional<size_t> count) {
+    //operator 动作: kind = Delete/Change, motion_spec_ = {motion, count}
+    return {kind, MotionSpec{motion, count}, std::nullopt, std::nullopt, std::nullopt};
+}
+
 void NormalModeParser::Reset() {
     state_ = State::Normal;
     pending_count_.reset();
@@ -184,6 +252,106 @@ void NormalModeParser::Reset() {
     pending_prefix_ = 0;
     pending_register_.reset();
     pending_char_kind_.reset();
+    pending_operator_count_.reset();
+}
+
+
+//d/c 收尾共用的开关表 (契约见 Command.hpp 的声明注释)
+//TODO 说明: 本函数是"接口联动"已实现; [count] 语义 (相乘) 在 FeedOperator/FeedOperatorCount 里完成
+std::optional<EditorAction> NormalModeParser::CompleteOperator(char value, std::optional<size_t> count) {
+    switch (value) {
+    case 'h': return GenerateOperator(*pending_operator_, Motion::Left, count);
+    case 'j': return GenerateOperator(*pending_operator_, Motion::Down, count);
+    case 'k': return GenerateOperator(*pending_operator_, Motion::Up, count);
+    case 'l': return GenerateOperator(*pending_operator_, Motion::Right, count);
+    case 'w': return GenerateOperator(*pending_operator_, Motion::WordForward, count);
+    case 'b': return GenerateOperator(*pending_operator_, Motion::WordBackward, count);
+    case 'e': return GenerateOperator(*pending_operator_, Motion::WordEnd, count);
+    case 'W': return GenerateOperator(*pending_operator_, Motion::WordForwardCap, count);
+    case 'B': return GenerateOperator(*pending_operator_, Motion::WordBackwardCap, count);
+    case 'E': return GenerateOperator(*pending_operator_, Motion::WordEndCap, count);
+    case '0': return GenerateOperator(*pending_operator_, Motion::LineStart, count);
+    case '^': return GenerateOperator(*pending_operator_, Motion::FirstNonBlank, count);
+    case '$': return GenerateOperator(*pending_operator_, Motion::LineEnd, count);
+    case 'G': return GenerateOperator(*pending_operator_, Motion::GotoLine, count);
+    case '%': return GenerateOperator(*pending_operator_, Motion::MatchPercent, count);
+    case 'D':
+        //d 后接 D: 按 d$ 处理 (D = d$, 见 FeedNormal 的注释)
+        return GenerateOperator(*pending_operator_, Motion::LineEnd, count);
+    case 'C':
+        return GenerateOperator(*pending_operator_, Motion::LineEnd, count);
+    case 'd':
+    case 'c': {
+        //doubled 形式 (dd/cc): 整行 linewise, motion_spec_ 缺省, count 为最终 count
+        EditorAction act;
+        act.kind_ = *pending_operator_;
+        act.count_ = count;
+        return act;
+    }
+    default:
+        //不完成命令的键: 由调用方决定取消
+        return std::nullopt;
+    }
+}
+
+//OperatorPending 的收尾 (契约见 Command.hpp 的声明注释)
+std::optional<EditorAction> NormalModeParser::FeedOperator(char value) {
+    //motion 的第二个 count 开始 (与 operator count 相乘)
+    if (value >= '1' && value <= '9') {
+        pending_count_ = static_cast<size_t>(value - '0');
+        state_ = State::OperatorCount;
+        return std::nullopt;
+    }
+    //g 前缀 (dge/dgg 等)
+    if (value == 'g') {
+        pending_prefix_ = 'g';
+        state_ = State::OperatorPrefixPending;
+        return std::nullopt;
+    }
+    std::optional<EditorAction> action = CompleteOperator(value, pending_operator_count_);
+    Reset();
+    return action; // nullopt = 取消整条命令并丢弃该键
+}
+
+//OperatorCount 的收尾: 数字继续拼 motion count, 其余同 FeedOperator (count 相乘)
+std::optional<EditorAction> NormalModeParser::FeedOperatorCount(char value) {
+    if (IsDigit(value)) {
+        *pending_count_ = *pending_count_ * 10 + static_cast<size_t>(value - '0');
+        return std::nullopt;
+    }
+    if (value == 'g') {
+        pending_prefix_ = 'g';
+        state_ = State::OperatorPrefixPending;
+        return std::nullopt;
+    }
+    //两侧 count 相乘 ([count1]d[count2]w)
+    std::optional<size_t> count;
+    if (pending_count_ || pending_operator_count_) {
+        count = pending_count_.value_or(1) * pending_operator_count_.value_or(1);
+    }
+    std::optional<EditorAction> action = CompleteOperator(value, count);
+    Reset();
+    return action;
+}
+
+//OperatorPrefixPending 的收尾: d/c 之后 g 前缀的第二个键 (ge/gE/gg)
+std::optional<EditorAction> NormalModeParser::FeedOperatorPrefix(char value) {
+    std::optional<size_t> count;
+    if (pending_count_ || pending_operator_count_) {
+        count = pending_count_.value_or(1) * pending_operator_count_.value_or(1);
+    }
+    std::optional<EditorAction> action;
+    switch (value) {
+    case 'e': action = GenerateOperator(*pending_operator_, Motion::WordBackwardEnd, count); break;
+    case 'E': action = GenerateOperator(*pending_operator_, Motion::WordBackwardEndCap, count); break;
+    case 'g': action = GenerateOperator(*pending_operator_, Motion::GotoFirstLine, count); break;
+    default:
+        //g 后跟其他键: 取消并丢弃
+        action = std::nullopt;
+        break;
+    }
+    Reset();
+    return action;
 }
 
 } // namespace sjtu
