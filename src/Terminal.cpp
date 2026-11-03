@@ -29,6 +29,8 @@ Terminal::Terminal() {
     //1. 读取并保存原来的终端设置
     //2. 在副本上关闭echo、按行输入和部分自动字符处理,使程序可以逐字节处理按键
     //3. 设置VMIN=0、VTIME=1,让一次read在没有输入时等待约0.1秒后返回
+    //注意: 用 TCSANOW 而不是 TCSAFLUSH——TCSAFLUSH 会丢弃设置前已到达的输入,
+    //冷启动时评测器的首批按键可能比本进程初始化更快, 全部被冲掉 (OJ 实测教训)
 
     if (::tcgetattr(STDIN_FILENO, &original_) == -1) {
         ThrowSystemError("tcgetattr");
@@ -46,7 +48,7 @@ Terminal::Terminal() {
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 1;
 
-    if (::tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+    if (::tcsetattr(STDIN_FILENO, TCSANOW, &raw) == -1) {
         ThrowSystemError("tcsetattr");
     }
 }
