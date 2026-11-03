@@ -507,7 +507,10 @@ void Editor::EnterInsertAbove(std::optional<size_t> count) {
     Position cursor = window_.GetCursor();
     buffer_.InsertLine(cursor.row_); // 标记随原语维护
     EnterInsert({cursor.row_, 0}, count);
-    RecordInsertOp({InsertOp::Kind::OpenAbove, 0});
+    //进入动作记为 Split 而不是 OpenAbove (OJ 实测, 测试点 549):
+    //vim 的 count-O 回放 = "在光标处换行"模型——每个副本插在前一个副本下方、光标跟随下移,
+    //3O<Esc> 后光标停在最下面的空行; 记为 Split 后回放恰好复现该行为
+    RecordInsertOp({InsertOp::Kind::Split, 0});
 }
 
 //d{motion}/dd/D
