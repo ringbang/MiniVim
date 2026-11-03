@@ -259,8 +259,8 @@ void Editor::LeaveSearch() {
 }
 
 void Editor::HandleSearch(KeyEvent key) {
-    //README:1097 只响应可打印 ASCII (/、?、反斜杠都是普通字符), 其余控制键一律忽略 (含 <BS>/<DEL>).
-    //OJ 证据: 加入 <BS> 编辑后 101/105/117/118 的首个分歧位置反而提前, 说明参考实现不做提示编辑.
+    //README:1097 只响应可打印 ASCII (/、?、反斜杠都是普通字符), 其余控制键忽略,
+    //但 <BS> 删最后一个字符 (与 OJ 参考一致; 空提示时 <BS> 无效果, 不取消——v3/v4 分歧位置反推).
     //<CR> 提交搜索, <Esc> 打断并完全恢复进入前的位置 (输入期间光标本就没动, 不修改搜索记录)
     if (key.code_ == KeyCode::Escape) {
         LeaveSearch();
@@ -279,6 +279,10 @@ void Editor::HandleSearch(KeyEvent key) {
             message_ = "Pattern not found"; //TODO: 与 OJ 参考实现的提示文本核对, 必要时调整
         }
         //空提示且无旧串: 静默失败 (与测试点 101/105 的 "empty prompt" 一致)
+        return;
+    }
+    if (key.code_ == KeyCode::Backspace) {
+        if (!search_input_.empty()) search_input_.pop_back(); // 空提示时无效果, 不取消
         return;
     }
     if (key.code_ == KeyCode::Character && IsPrintable(key.value_)) {
