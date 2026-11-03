@@ -476,14 +476,14 @@ void Editor::ReplayInsertSession() {
 void Editor::EnterInsertLineStart(std::optional<size_t> count) {
     Position cursor = window_.GetCursor();
     const std::string& line = buffer_.GetLineAt(cursor.row_);
-    cursor.column_ = 0;
+    cursor.column_ = line.size();
     for (std::size_t i = 0; i < line.size(); ++i) {
         if (line[i] != ' ' && line[i] != '\t') {
             cursor.column_ = i;
             break;
         }
     }
-    //行内只有空格/Tab 或空行 → 保持第 0 列 (README 固定规则, 与 ^ 不同)
+    //行内只有空格/Tab 或空行 → 保持最后一列
     EnterInsert(cursor, count);
 }
 
@@ -583,7 +583,6 @@ void Editor::ExecuteJoin(std::optional<size_t> count) {
 }
 
 //~/[count]~
-//TODO(文本的修正与移动一): 实现 — README:1539-1551
 void Editor::ExecuteFlipCase(std::optional<size_t> count) {
     Position cursor = window_.GetCursor();
     const std::string &line = buffer_.GetLineAt(cursor.row_);
