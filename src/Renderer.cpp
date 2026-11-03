@@ -88,8 +88,14 @@ std::string Renderer::Render(const Buffer& buffer, const Window& window, const R
     else {
         const std::string& text_line = buffer.GetLineAt(window.GetCursor().row_);
         cursor_row = window.GetCursor().row_ - viewport.top_;
-        //光标落在 Tab 上时画在 Tab 的最后一格 (与 vim 一致)
-        cursor_column = CursorCellColumn(text_line, window.GetCursor().column_) - viewport.left_;
+        if (state.mode_ == Mode::Insert) {
+            //插入模式的光标是"字符之间的插入位置": 画在插入点的起始显示列
+            //(光标在 Tab 之前时画在 Tab 的第一格; OJ 实测, 测试点 172)
+            cursor_column = BufferColumnToRenderColumn(text_line, window.GetCursor().column_) - viewport.left_;
+        } else {
+            //Normal/Visual: 光标落在 Tab 上时画在 Tab 的最后一格 (与 vim 一致, h/l 已过 OJ)
+            cursor_column = CursorCellColumn(text_line, window.GetCursor().column_) - viewport.left_;
+        }
     }
 
     // 转换为 1-based
