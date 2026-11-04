@@ -146,10 +146,12 @@ std::string Buffer::EraseRange(const Range& range) {
 //1. 循环 count 次: lines_[row][column + i] = value
 //2. modified_ = true
 void Buffer::ReplaceCharacters(std::size_t row, std::size_t column, std::size_t count, char value) {
-    (void)row;
-    (void)column;
-    (void)count;
-    (void)value;
+    // 已经保证不越界
+    for (size_t i = 0; i < count; i++) {
+        lines_[row][column + i] = value;
+    }
+    modified_ = true;  // 即使与原字符相同也算已更改
+    end_with_newline_ = true;
 }
 
 //~ 翻转一个字符 (契约见 Buffer.hpp 的注释)

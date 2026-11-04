@@ -548,29 +548,71 @@ void Editor::ExecuteChange(const EditorAction& action) {
 
 //x/[count]x (backward = false) 与 X/[count]X (backward = true)
 //TODO(文本的修正与移动一): 实现 — README:1433-1459
-//1. 空行 → 无效果, 直接返回
-//2. 实际删除数 n = min(count, 可删字符数)
-//   (x: 光标到行末的字符数; X: 光标左侧的字符数; X 在行首时 n = 0 直接返回)
-//3. 删除并收集文本 (x 反复删同一列: 后面的字符依次补上来; 或从后往前删)
-//4. 写 register (charwise, vim 默认行为: x/X 写入 unnamed)
-//5. 光标: EditEngine::CursorAfterX / CursorAfterXBack; window_.SetCursor 更新 curswant
-//6. 修改了 Buffer → search_engine_.Invalidate()
 void Editor::ExecuteDeleteChar(bool backward, std::optional<size_t> count) {
-    (void)backward;
-    (void)count;
+    Position cursor = window_.GetCursor();
+    const std::string line = buffer_.GetLineAt(cursor.row_);
+    std::string deleted_text = "";
+    //1. 空行 → 无效果, 直接返回
+    if (line.empty()) { return; }
+    if (!backward) {
+        //2. 实际删除数 n = min(count, 可删字符数)
+        //   (x: 光标到行末的字符数)
+        size_t n = std::min(count.value_or(1), line.size() - cursor.column_);
+        if (n == 0) { return; }
+        //3. 删除并收集文本 (x 反复删同一列: 后面的字符依次补上来)
+        for (size_t i = 0; i < n; i++) {
+            deleted_text += buffer_.GetLineAt(cursor.row_)[cursor.column_];
+            buffer_.EraseCharacter(cursor.row_, cursor.column_);
+        }
+        //4. 写 register (charwise, vim 默认行为: x/X 写入 unnamed)
+        register_.Set(Register::kUnnamed, deleted_text, RangeType::Characterwise);
+        //5. 光标: EditEngine::CursorAfterX; 
+        // window_.SetCursor 更新 curswant
+        Position new_cursor = EditEngine::CursorAfterX(buffer_, cursor, n);
+        window_.SetCursor(buffer_, new_cursor, false);
+        //6. 修改了 Buffer → search_engine_.Invalidate()
+        search_engine_.Invalidate();
+    }
+    else {
+        //2. 实际删除数 n = min(count, 可删字符数)
+        // X: 光标左侧的字符数; X 在行首时 n = 0 直接返回
+        size_t n = std::min(count.value_or(1), cursor.column_);
+        if (n == 0) { return; }
+        //3. 删除并收集文本
+        deleted_text = line.substr(cursor.column_ - n, n);
+        for (size_t i = 0; i < n; i++) {
+            buffer_.EraseCharacter(cursor.row_, cursor.column_ - n);
+        }
+        //4. 写 register (charwise, vim 默认行为: x/X 写入 unnamed)
+        register_.Set(Register::kUnnamed, deleted_text, RangeType::Characterwise);
+        //5. 光标: EditEngine::CursorAfterXBack; 
+        // window_.SetCursor 更新 curswant
+        Position new_cursor = EditEngine::CursorAfterXBack(buffer_, cursor, n);
+        window_.SetCursor(buffer_, new_cursor, false);
+        //6. 修改了 Buffer → search_engine_.Invalidate()
+        search_engine_.Invalidate();
+    }
 }
 
 //r/[count]r
-//TODO(文本的修正与移动一): 实现 — README:1495-1511
-//1. 空行 → 无效果
-//2. 行内从光标到行末的字符数 < count → 整条命令失败: 不修改任何字符,
-//   光标与 curswant 不变, 不写 register (README:1501)
-//3. buffer_.ReplaceCharacters(row, col, count, char) (与原字符相同也算修改, README:1507)
-//4. 光标停在最后一个被替换的字符上; curswant 更新为其显示列 (用 window_.SetCursor)
-//5. 不写 register (README:1509)
-//6. 修改了 Buffer → search_engine_.Invalidate()
 void Editor::ExecuteReplace(const EditorAction& action) {
-    (void)action;
+    Position cursor = window_.GetCursor();
+    const std::string &line = buffer_.GetLineAt(cursor.row_);
+    //1. 空行 → 无效果
+    if (line.empty()) { return; }
+    //2. 行内从光标到行末的字符数 < count → 整条命令失败: 不修改任何字符,
+    //   光标与 curswant 不变, 不写 register (README:1501)
+    size_t count = action.count_.value_or(1);
+    if (line.size() - cursor.column_ < count || !action.arg_) { return; }
+    //3. buffer_.ReplaceCharacters(row, col, count, char)
+    // (与原字符相同也算修改, README:1507)
+    buffer_.ReplaceCharacters(cursor.row_, cursor.column_, count, action.arg_.value());
+    //4. 光标停在最后一个被替换的字符上; curswant 更新为其显示列 (用 window_.SetCursor)
+    cursor.column_ += count - 1;
+    window_.SetCursor(buffer_, cursor, false);
+    //5. 不写 register (README:1509)
+    //6. 修改了 Buffer → search_engine_.Invalidate()
+    search_engine_.Invalidate();
 }
 
 //J/[count]J

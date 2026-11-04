@@ -48,17 +48,19 @@ Position EditEngine::CursorAfterLinewiseDelete(const Buffer& buffer_after, const
 //[count]x 后的光标 (契约见 Edit.hpp 的注释)
 //TODO(文本的修正与移动一): 实现
 Position EditEngine::CursorAfterX(const Buffer& buffer_after, Position origin, size_t count) {
-    (void)buffer_after;
-    (void)count;
-    return origin;
+    Position pos = origin;
+    const std::string &line = buffer_after.GetLineAt(origin.row_);
+    if (line.empty()) { pos.column_ = 0; }
+    else { pos.column_ = std::min(line.size() - 1, origin.column_); }
+    return pos;
 }
 
 //[count]X 后的光标 (契约见 Edit.hpp 的注释)
 //TODO(文本的修正与移动一): 实现
 Position EditEngine::CursorAfterXBack(const Buffer& buffer_after, Position origin, size_t count) {
-    (void)buffer_after;
-    (void)count;
-    return origin;
+    Position pos = origin;
+    pos.column_ = (origin.column_ >= count) ? origin.column_ - count : 0;
+    return pos;
 }
 
 //J 后的光标 (契约见 Edit.hpp 的注释)
