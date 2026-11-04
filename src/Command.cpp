@@ -204,10 +204,11 @@ std::optional<EditorAction> NormalModeParser::FeedPrefix(char value) {
 //否则取消整个命令 (与非法键一致); 后续章节的 r/f/t/q/@ 在这里扩展
 std::optional<EditorAction> NormalModeParser::FeedChar(char value) {
     //r 收尾 (先于 m/` 判断, 因为 r 的 {char} 也可能是 a-z):
-    //{char} 必须是可打印 ASCII (0x20-0x7e), 否则取消整个命令 (README:1511);
+    //{char} 是可打印 ASCII (0x20-0x7e) 或 Tab (README:1505 要求支持"替换成一个 Tab"),
+    //其余 (含 <Esc> 等控制键) 取消整个命令 (README:1511);
     //[count]r 的 count 由 pending_count_ 带入动作
     if (pending_char_kind_ && *pending_char_kind_ == ActionKind::ReplaceChar) {
-        if (value >= 0x20 && value <= 0x7e) {
+        if ((value >= 0x20 && value <= 0x7e) || value == '\t') {
             EditorAction act;
             act.kind_ = ActionKind::ReplaceChar;
             act.count_ = pending_count_;

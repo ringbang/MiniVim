@@ -607,9 +607,9 @@ void Editor::ExecuteReplace(const EditorAction& action) {
     //3. buffer_.ReplaceCharacters(row, col, count, char)
     // (与原字符相同也算修改, README:1507)
     buffer_.ReplaceCharacters(cursor.row_, cursor.column_, count, action.arg_.value());
-    //4. 光标停在最后一个被替换的字符上; curswant 更新为其显示列 (用 window_.SetCursor)
+    //4. 光标停在最后一个被替换的字符上; curswant 更新为其显示列
     cursor.column_ += count - 1;
-    window_.SetCursor(buffer_, cursor, false);
+    window_.JumpTo(buffer_, cursor);
     //5. 不写 register (README:1509)
     //6. 修改了 Buffer → search_engine_.Invalidate()
     search_engine_.Invalidate();
