@@ -275,7 +275,11 @@ std::optional<EditorAction> NormalModeParser::CompleteOperator(char value, std::
     case '^': return GenerateOperator(*pending_operator_, Motion::FirstNonBlank, count);
     case '$': return GenerateOperator(*pending_operator_, Motion::LineEnd, count);
     case 'G': return GenerateOperator(*pending_operator_, Motion::GotoLine, count);
-    case '%': return GenerateOperator(*pending_operator_, Motion::MatchPercent, count);
+    case '%':
+        //% 带 count 是"按百分比跳行"(linewise, README:1129), 不带 count 才是括号匹配
+        //(测试点 321 "explicit percentages are linewise")
+        return GenerateOperator(*pending_operator_,
+                                count.has_value() ? Motion::PercentLine : Motion::MatchPercent, count);
     case 'D':
         //d 后接 D: 按 d$ 处理 (D = d$, 见 FeedNormal 的注释)
         return GenerateOperator(*pending_operator_, Motion::LineEnd, count);
