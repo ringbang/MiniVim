@@ -133,6 +133,7 @@ void Buffer::EnsureNonEmpty() {
 std::string Buffer::EraseRange(const Range& range) {
     std::string deleted_text = "";
     bool erased = false;
+    size_t line_count_before = lines_.size();
     switch (range.kind_) {
     //1. Linewise: 循环 EraseLine(begin.row_) (每删一行后该下标又是下一行),
     //   拼接返回值, 行间加 '\n' (末行不加); EraseLine 自带标记维护
@@ -195,10 +196,14 @@ std::string Buffer::EraseRange(const Range& range) {
         break;
     }
     }
-    //4. 置 modified_ = true; end_with_newline_ = true (README:1247); 空范围不算修改
+    //4. 置 modified_ / end_with_newline_ (README:1247); 空范围不算修改
     if (erased) {
         modified_ = true;
-        end_with_newline_ = true;
+        //Linewise 删除覆盖整个文件时, 保存不添加换行
+        //(README:1247 "Linewise 级别删除全部后, 文件里没有多余的换行"; OJ 实测 3D 删光 → 保存 "")
+        bool deleted_whole_file = (range.kind_ == RangeKind::Linewise
+            && range.begin_.row_ == 0 && range.end_.row_ == line_count_before - 1);
+        end_with_newline_ = !deleted_whole_file;
     }
     EnsureNonEmpty();
     return deleted_text;
