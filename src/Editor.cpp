@@ -515,35 +515,94 @@ void Editor::EnterInsertAbove(std::optional<size_t> count) {
 
 //d{motion}/dd/D
 //TODO(文本的修正与移动一): 实现
-//1. 组装 range:
-//   - motion_spec_ 有值 → EditEngine::ComputeRange(buffer_, cursor, desired_column, spec);
-//     nullopt (motion 失败) → 整条命令取消: 不修改文本/寄存器, 光标与视口不动, 直接返回 (README:897)
-//   - motion_spec_ 无值 (dd) → Linewise 当前行, count = action.count_.value_or(1),
-//     end.row_ = min(begin.row_ + count - 1, 末行)
-//2. d 专用: EditEngine::NormalizeDeleteRange (README:1475 自动转 linewise)
-//3. 空范围 (CharacterwiseExclusive 且 begin == end) → 不删除、不写 register, 直接返回 (README:897)
-//4. std::string text = buffer_.EraseRange(range) → register_.Set('"', text, 类型)
-//   (Linewise → RangeType::Linewise; 其余 → RangeType::Characterwise; README:1471)
-//5. 光标: Linewise → EditEngine::CursorAfterLinewiseDelete(buffer_, range);
-//   Characterwise → EditEngine::CursorAfterCharacterwiseDelete(buffer_, range);
-//   window_.SetCursor(buffer_, pos, false) (同时更新 curswant 与视口)
-//6. 修改了 Buffer → search_engine_.Invalidate() (搜索缓存失效, 串与方向保留)
 void Editor::ExecuteDelete(const EditorAction& action) {
-    (void)action;
+    Position cursor = window_.GetCursor();
+    size_t desired_column = window_.GetDesiredColumn();
+    Range range;
+    size_t count = action.count_.value_or(1);
+    //1. 组装 range:
+    //   - motion_spec_ 有值 → EditEngine::ComputeRange(buffer_, cursor, desired_column, spec);
+    //     nullopt (motion 失败) → 整条命令取消: 不修改文本/寄存器, 光标与视口不动, 直接返回 (README:897)
+    //   - motion_spec_ 无值 (dd) → Linewise 当前行, count = action.count_.value_or(1),
+    //     end.row_ = min(begin.row_ + count - 1, 末行)
+    if (action.motion_spec_) {
+        auto pre_range = EditEngine::ComputeRange(buffer_, cursor, desired_column, *action.motion_spec_);
+        if (!pre_range) { return; }
+        else { range = *pre_range; }
+    }
+    else {
+        range.kind_ = RangeKind::Linewise;
+        range.begin_ = {cursor.row_, 0};
+        range.end_ = {std::min(cursor.row_ + count - 1, buffer_.GetLineCount() - 1), 0};
+    }
+    //2. d 专用: EditEngine::NormalizeDeleteRange (README:1475 自动转 linewise)
+    range = EditEngine::NormalizeDeleteRange(buffer_, range);
+    //3. 空范围 (CharacterwiseExclusive 且 begin == end) → 
+    // 不删除、不写 register, 直接返回 (README:897)
+    if (range.kind_ == RangeKind::CharacterwiseExclusive && range.begin_ == range.end_) { return; }
+    //4. std::string text = buffer_.EraseRange(range) → 
+    // register_.Set('"', text, 类型)
+    //   (Linewise → RangeType::Linewise; 其余 → 
+    // RangeType::Characterwise; README:1471)
+    std::string deleted_text = buffer_.EraseRange(range);
+    register_.Set('"', deleted_text, (range.kind_ == RangeKind::Linewise) ? 
+                  RangeType::Linewise : RangeType::Characterwise);
+    //5. 光标: Linewise → EditEngine::CursorAfterLinewiseDelete(buffer_, range);
+    //   Characterwise → EditEngine::CursorAfterCharacterwiseDelete(buffer_, range);
+    //   window_.SetCursor(buffer_, pos, false) (同时更新 curswant 与视口)
+    Position new_cursor = (range.kind_ == RangeKind::Linewise)
+        ? EditEngine::CursorAfterLinewiseDelete(buffer_, range)
+        : EditEngine::CursorAfterCharacterwiseDelete(buffer_, range);
+    window_.SetCursor(buffer_, new_cursor, false);
+    //6. 修改了 Buffer → search_engine_.Invalidate() (搜索缓存失效, 串与方向保留)
+    search_engine_.Invalidate();
 }
 
 //c{motion}/cc/C
 //TODO(文本的修正与移动一): 实现
-//1. 组装 range: 与 ExecuteDelete 相同, 但【不】调用 NormalizeDeleteRange
-//2. 空范围 → 不删除文本, 直接在当前位置进入 Insert (README:1485)
-//3. 删除并写 register (与 d 相同, README:1489)
-//4. 进入 Insert:
-//   - Characterwise: 在 range.begin_ 进入 (EnterInsert(begin))
-//   - Linewise: 删除后 buffer_.InsertLine(begin.row_) 在原范围位置保留一个空行,
-//     在该空行唯一位置进入 Insert (README:1487)
-//5. 修改了 Buffer → search_engine_.Invalidate()
 void Editor::ExecuteChange(const EditorAction& action) {
-    (void)action;
+    //1. 组装 range: 与 ExecuteDelete 相同, 但【不】调用 NormalizeDeleteRange
+    Position cursor = window_.GetCursor();
+    size_t desired_column = window_.GetDesiredColumn();
+    Range range;
+    size_t count = action.count_.value_or(1);
+    if (action.motion_spec_) {
+        auto pre_range = EditEngine::ComputeRange(buffer_, cursor, desired_column, *action.motion_spec_);
+        if (!pre_range) { return; }
+        else { range = *pre_range; }
+    }
+    else {
+        range.kind_ = RangeKind::Linewise;
+        range.begin_ = {cursor.row_, 0};
+        range.end_ = {std::min(cursor.row_ + count - 1, buffer_.GetLineCount() - 1), 0};
+    }
+    //2. 空范围 → 不删除文本, 直接在当前位置进入 Insert (README:1485)
+    //   注意不传 count: [count] 属于 operator 范围, 不参与插入回放
+    //   (vim 实测 3c$foo<Esc> 的 foo 只出现一次; README:1403 的回放只限 i/I/a/A/o/O)
+    if (range.kind_ == RangeKind::CharacterwiseExclusive && range.begin_ == range.end_) {
+        EnterInsert(range.begin_);
+        return;
+    }
+    //3. 删除并写 register (与 d 相同, README:1489)
+    size_t line_count_before = buffer_.GetLineCount();
+    std::string deleted_text = buffer_.EraseRange(range);
+    register_.Set('"', deleted_text, (range.kind_ == RangeKind::Linewise) ? 
+                  RangeType::Linewise : RangeType::Characterwise);
+    //4. 进入 Insert:
+    //   - Characterwise: 在 range.begin_ 进入 (EnterInsert(begin))
+    //   - Linewise: 删除后 buffer_.InsertLine(begin.row_) 在原范围位置保留一个空行,
+    //     在该空行唯一位置进入 Insert (README:1487);
+    //     例外: 删掉的范围覆盖整个文件时 EnsureNonEmpty 留下的空行就是"保留的空行",
+    //     不再补插 (vim 实测 cc 唯一行 → 一个空行)
+    if (range.kind_ == RangeKind::Linewise) {
+        bool whole_file = (range.begin_.row_ == 0 && range.end_.row_ == line_count_before - 1);
+        if (!whole_file) {
+            buffer_.InsertLine(range.begin_.row_);
+        }
+    }
+    EnterInsert(range.begin_);
+    //5. 修改了 Buffer → search_engine_.Invalidate()
+    search_engine_.Invalidate();
 }
 
 //x/[count]x (backward = false) 与 X/[count]X (backward = true)

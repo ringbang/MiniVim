@@ -38,6 +38,9 @@ public:
     // spec.count_ 为 nullopt 表示未输入 count; G/gg 以此区分"无 count"与"count=1"
     static MotionResult Compute(const Buffer& buffer, Position origin,
                                 size_t curswant, MotionSpec spec);
+    //行跳转命令 (G/gg/[count]%) 与 linewise 删除后光标共用的"第一非空白"列定位
+    //(行内全空白停在最后一个字符; 空行停唯一位置). 公开出来供 EditEngine 复用
+    static Position LineJumpTarget(const Buffer& buffer, std::size_t row);
 
 private:
     // ---- 光标的移动(一) ----

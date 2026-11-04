@@ -234,11 +234,6 @@ std::optional<Position> FindBracketCandidate(const Buffer& buffer, Position orig
 std::optional<Position> ScanBracketMatch(const Buffer& buffer, Position start,
                                          char open, char close, bool forward);
 
-//行跳转命令 (G/gg/[count]%) 共用的目标行列定位: 第一个非空白字符;
-//行内全为空白 (空格+Tab, 与 ^ 的实测结论一致) 停在最后一个字符; 空行停在该行唯一位置.
-//G/gg 现在直接调用 ComputeFirstNonBlank 完成了同样的事情, 建议实现本函数后顺手把 G/gg 改为复用它.
-Position LineJumpTarget(const Buffer& buffer, std::size_t row);
-
 } // namespace
 
 MotionResult MotionEngine::Compute(const Buffer& buffer, Position origin,
@@ -780,9 +775,11 @@ std::optional<Position> ScanBracketMatch(const Buffer& buffer, Position start,
     }
 }
 
-//行跳转命令 (G/gg/[count]%) 共用的目标行列定位: 第一个非空白字符 (空格+Tab 均视为空白);
-//行内全为空白停在最后一个字符; 空行停在该行唯一位置.
-Position LineJumpTarget(const Buffer& buffer, std::size_t row) {
+} // namespace
+
+//行跳转命令 (G/gg/[count]%) 与 linewise 删除后光标共用的目标行列定位:
+//第一个非空白字符 (空格+Tab 均视为空白); 行内全为空白停在最后一个字符; 空行停在该行唯一位置.
+Position MotionEngine::LineJumpTarget(const Buffer& buffer, std::size_t row) {
     Position pos;
     pos.row_ = row;
     const std::string& line = buffer.GetLineAt(row);
@@ -799,7 +796,5 @@ Position LineJumpTarget(const Buffer& buffer, std::size_t row) {
     pos.column_ = line.length() - 1;
     return pos;
 }
-
-} // namespace
 
 } // namespace sjtu

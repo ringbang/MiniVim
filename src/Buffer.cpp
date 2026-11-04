@@ -125,20 +125,78 @@ void Buffer::JoinLine(std::size_t row) {
 //TODO(文本的修正与移动一): 实现
 //1. lines_.empty() 时 push_back(""), 不因此置 modified_
 void Buffer::EnsureNonEmpty() {
+    if (lines_.empty()) { lines_.push_back(""); }
 }
 
 //删除 range 覆盖的文本并返回被删除文本 (契约见 Buffer.hpp 的注释)
 //TODO(文本的修正与移动一): 实现
-//1. Linewise: 循环 EraseLine(begin.row_) (每删一行后该下标又是下一行), 拼接返回值,
-//   行间加 '\n'; 循环 end - begin + 1 次; 最后 EnsureNonEmpty
-//2. Characterwise 同行: 从后往前 EraseCharacter 删除 [begin, end) (Inclusive 时含 end),
-//   收集字符组成返回串
-//3. Characterwise 跨行: 收集首行尾部 + '\n' + 中间完整行 (EraseLine) + '\n' + 末行头部,
-//   删除中间行后 JoinLine(begin.row_) 合并首尾两行
-//4. 置 modified_ = true; end_with_newline_ = true (README:1247)
 std::string Buffer::EraseRange(const Range& range) {
-    (void)range;
-    return {};
+    std::string deleted_text = "";
+    bool erased = false;
+    switch (range.kind_) {
+    //1. Linewise: 循环 EraseLine(begin.row_) (每删一行后该下标又是下一行),
+    //   拼接返回值, 行间加 '\n' (末行不加); EraseLine 自带标记维护
+    case RangeKind::Linewise: {
+        size_t line_count = range.end_.row_ - range.begin_.row_ + 1;
+        for (size_t i = 0; i < line_count; i++) {
+            deleted_text += EraseLine(range.begin_.row_);
+            deleted_text += '\n';
+        }
+        deleted_text.pop_back();
+        erased = line_count > 0;
+        break;
+    }
+    //2/3. Characterwise: 同行删 [begin, end) 或含 end; 跨行删首行尾 + 中间整行 + 末行头,
+    //    最后 JoinLine 合并首尾两行 (标记维护随各原语自动生效)
+    case RangeKind::CharacterwiseExclusive:
+    case RangeKind::CharacterwiseInclusive: {
+        bool inclusive = (range.kind_ == RangeKind::CharacterwiseInclusive);
+        if (range.begin_.row_ == range.end_.row_) {
+            //同行: 反复删同一列, 字符依次补位, 文本顺序不变
+            size_t n = range.end_.column_ - range.begin_.column_ + (inclusive ? 1 : 0);
+            for (size_t i = 0; i < n; i++) {
+                deleted_text += lines_[range.begin_.row_][range.begin_.column_];
+                EraseCharacter(range.begin_.row_, range.begin_.column_);
+            }
+            erased = n > 0;
+        } else {
+            //跨行: 先取文本 (删除前的原文), 再删除
+            const std::string& first_line = lines_[range.begin_.row_];
+            //(a) 首行尾部 [begin.col, 行尾)
+            deleted_text = first_line.substr(range.begin_.column_);
+            deleted_text += '\n';
+            //(b) 中间完整行: 每次 EraseLine(begin.row_+1), 下一行补位
+            size_t middle_count = range.end_.row_ - range.begin_.row_ - 1;
+            for (size_t i = 0; i < middle_count; i++) {
+                deleted_text += EraseLine(range.begin_.row_ + 1);
+                deleted_text += '\n';
+            }
+            //(c) 末行头部 [0, end.col] (Exclusive 不含 end.col; 课程简化: 不自动转换, README:889)
+            size_t head_len = range.end_.column_ + (inclusive ? 1 : 0);
+            deleted_text += lines_[range.begin_.row_ + 1].substr(0, head_len);
+            //(d) 删除: 首行尾 (反复删 begin.col) + 末行头 (反复删 0) + 合并
+            //注意: first_line 是引用, 删除中行内容会变短——长度必须先取好,
+            //否则循环条件每次重算会提前终止
+            size_t tail_len = first_line.size() - range.begin_.column_;
+            for (size_t i = 0; i < tail_len; i++) {
+                EraseCharacter(range.begin_.row_, range.begin_.column_);
+            }
+            for (size_t i = 0; i < head_len; i++) {
+                EraseCharacter(range.begin_.row_ + 1, 0);
+            }
+            JoinLine(range.begin_.row_);
+            erased = true;
+        }
+        break;
+    }
+    }
+    //4. 置 modified_ = true; end_with_newline_ = true (README:1247); 空范围不算修改
+    if (erased) {
+        modified_ = true;
+        end_with_newline_ = true;
+    }
+    EnsureNonEmpty();
+    return deleted_text;
 }
 
 //[count]r 替换 (契约见 Buffer.hpp 的注释)

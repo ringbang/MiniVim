@@ -29,6 +29,7 @@ public:
     void JumpTo(const Buffer& buffer, Position position);
     const Position& GetCursor() const ;
     const Viewport& GetViewport() const ;
+    const size_t& GetDesiredColumn() const ;
 
 private:
     void MoveLeft(const Buffer& buffer, size_t count);

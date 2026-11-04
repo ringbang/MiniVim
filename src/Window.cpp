@@ -104,6 +104,11 @@ const Viewport& Window::GetViewport() const {
     return viewport_;
 }
 
+const size_t& Window::GetDesiredColumn() const {
+    // 返回期望显示列的只读引用
+    return desired_column_;
+}
+
 
 void Window::SetCursor(const Buffer& buffer, Position position, bool allow_line_end) {
     //1. 先限制行号, 再根据该行长度和 allow_line_end 限制列号
