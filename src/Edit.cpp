@@ -65,20 +65,26 @@ Range EditEngine::NormalizeDeleteRange(const Buffer& buffer, Range range) {
     if (range.kind_ == RangeKind::Linewise || range.begin_.row_ == range.end_.row_) { return range; }
     bool toLinewise = true;
     //2. 检查 begin 行 [0, begin.column_) 是否全为空格/Tab
-    std::string line1 = buffer.GetLineAt(range.begin_.row_).substr(0, range.begin_.column_);
+    std::string line1 = buffer.GetLineAt(range.begin_.row_)
+        .substr(0, std::min(range.begin_.column_, buffer.GetLineAt(range.begin_.row_).size()));
     if (line1.find_first_not_of(" \t") != std::string::npos) { toLinewise = false; }
     else {
         //3. 检查 end 行结束位置之后到行尾是否没有非空白字符
         //   (CharacterwiseInclusive 从 end.column_ + 1 起, 
         //   Exclusive 从 end.column_ 起——注意按字面核对)
         std::string line2 = "";
+        //终点行可能是空行 (如 2D 跨过空行): substr 的 pos 必须钳到行长,
+        //否则 pos > size 抛异常 (测试点 196 的崩溃根因)
+        size_t end_line_len = buffer.GetLineAt(range.end_.row_).size();
         switch (range.kind_) {
             case RangeKind::CharacterwiseExclusive: {
-                line2 = buffer.GetLineAt(range.end_.row_).substr(range.end_.column_);
+                line2 = buffer.GetLineAt(range.end_.row_)
+                    .substr(std::min(range.end_.column_, end_line_len));
                 break;
             }
             case RangeKind::CharacterwiseInclusive: {
-                line2 = buffer.GetLineAt(range.end_.row_).substr(range.end_.column_ + 1);
+                line2 = buffer.GetLineAt(range.end_.row_)
+                    .substr(std::min(range.end_.column_ + 1, end_line_len));
                 break;
             }
         }

@@ -154,6 +154,9 @@ std::string Buffer::EraseRange(const Range& range) {
         if (range.begin_.row_ == range.end_.row_) {
             //同行: 反复删同一列, 字符依次补位, 文本顺序不变
             size_t n = range.end_.column_ - range.begin_.column_ + (inclusive ? 1 : 0);
+            //空行/短行保护: Inclusive [x,x] 落在空行上时无字符可删 (README:896 空行无字符),
+            //否则 EraseCharacter 会因越界抛异常 (测试点 198/201 的崩溃根因)
+            n = std::min(n, lines_[range.begin_.row_].size() - std::min(range.begin_.column_, lines_[range.begin_.row_].size()));
             for (size_t i = 0; i < n; i++) {
                 deleted_text += lines_[range.begin_.row_][range.begin_.column_];
                 EraseCharacter(range.begin_.row_, range.begin_.column_);
@@ -171,8 +174,10 @@ std::string Buffer::EraseRange(const Range& range) {
                 deleted_text += EraseLine(range.begin_.row_ + 1);
                 deleted_text += '\n';
             }
-            //(c) 末行头部 [0, end.col] (Exclusive 不含 end.col; 课程简化: 不自动转换, README:889)
+            //(c) 末行头部 [0, end.col] (Exclusive 不含 end.col; 课程简化: 不自动转换, README:889);
+            //终点行是空行时头部为空 (Inclusive [x,0] 在空行上无字符, README:896)
             size_t head_len = range.end_.column_ + (inclusive ? 1 : 0);
+            head_len = std::min(head_len, lines_[range.begin_.row_ + 1].size());
             deleted_text += lines_[range.begin_.row_ + 1].substr(0, head_len);
             //(d) 删除: 首行尾 (反复删 begin.col) + 末行头 (反复删 0) + 合并
             //注意: first_line 是引用, 删除中行内容会变短——长度必须先取好,
