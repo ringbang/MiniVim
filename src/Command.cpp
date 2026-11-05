@@ -1,5 +1,7 @@
 #include "Command.hpp"
 
+#include <cstdint> // SIZE_MAX
+
 namespace sjtu {
 
 namespace {
@@ -8,18 +10,23 @@ bool IsDigit(char value) {
     return value >= '0' && value <= '9';
 }
 
-//count 追加一位数字; 超过 COUNT_MAX 时钳至上限并继续吞掉后面的数字 (README:730, hint 1)
+//count 追加一位数字; 只做防溢出饱和 (uint64 上限), 继续吞掉后面的数字.
+//【注意】不要把 count 钳到 COUNT_MAX = 1,000,000: OJ 的 count-n/count-N 测试点
+//("billion-count repeats") 会把十亿级 count 原样交给 SearchEngine 做取模定位
+//(README:1112), 钳到 1e6 会使取模结果错位 (实测 115/116 因此挂掉);
+//移动类消费者 (j/k/h/l/w/e/x 等) 本就按可执行距离算术截断, 不会空转超大 count.
 size_t AppendCountDigit(size_t count, char digit) {
     size_t d = static_cast<size_t>(digit - '0');
-    if (count > (COUNT_MAX - d) / 10) { return COUNT_MAX; }
+    if (count > (SIZE_MAX - d) / 10) { return SIZE_MAX; }
     return count * 10 + d;
 }
 
-//operator 两侧 count 相乘 (缺省为 1), 溢出时饱和到 COUNT_MAX (README:730)
+//operator 两侧 count 相乘 (缺省为 1), 溢出时饱和到 SIZE_MAX (防 uint64 回绕,
+//语义上 range 计算会对超大值自行截断, 与未饱和时的可执行结果一致)
 size_t MultiplyCounts(std::optional<size_t> a, std::optional<size_t> b) {
     size_t x = a.value_or(1);
     size_t y = b.value_or(1);
-    if (x != 0 && y > COUNT_MAX / x) { return COUNT_MAX; }
+    if (x != 0 && y > SIZE_MAX / x) { return SIZE_MAX; }
     return x * y;
 }
 
