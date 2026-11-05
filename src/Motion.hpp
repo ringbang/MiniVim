@@ -42,6 +42,32 @@ public:
     //(行内全空白停在最后一个字符; 空行停唯一位置). 公开出来供 EditEngine 复用
     static Position LineJumpTarget(const Buffer& buffer, std::size_t row);
 
+    // ---- 文本的修正与移动(一): cw/cW 特例 ----
+    //README:951 课程特例 1: 光标在非空白字符上时, cw/cW 等价于 ce/cE (不包含后方空白).
+    //计算 [count]cw/[count]cW 的终点 (vim normal.c nv_wordcmd + textobject.c end_word 的
+    //end_word(count, bigword, stop=true) 语义, 词类划分与 e 相同):
+    //  stop 只在第一步生效: 光标已在 word 末字符时第一步不移动 (vim 的 "站在词尾按 cw
+    //  只改一个字符" 行为); 其余各步与 e 相同, 跳到下一个 word 的末字符;
+    //  找不到下一位置时停在最后到达的位置 (MiniVim e 的 README 约定, 不失败).
+    //返回的位置一定 >= origin; 调用方用它构造 CharacterwiseInclusive range.
+    static Position ComputeChangeWordEnd(const Buffer& buffer, Position origin,
+                                         bool cap, size_t count);
+
+    //operator 的 w/W 动作结果 (README:952 课程特例 2: 范围包含该 word 的末字符, 不包含换行符)
+    struct OperatorWordTarget {
+        Position target_{};      // w 的目标位置 (可停在下一行行首, 见注释)
+        bool inclusive_{false};  // 目标停在行尾 NUL 位置且列 > 0 时回退一列并 inclusive
+                                 // (vim adjust_cursor): 范围含该 word 末字符, 不含换行
+    };
+    //vim textobject.c fwd_word(count, bigword, eol=true) 的移植, 供 d/c/y/</> 的 w range
+    //使用 (纯移动的 w 仍走 ComputeWordForward, 语义不同):
+    //  eol=true: 每一步的空白跳跃不跨过换行 (最后一步跨行时停在下一行行首, 范围含换行);
+    //  越过最后一个 word 到达行尾 NUL 后前进失败 → 停在 NUL 位置, 由调用方按
+    //  adjust_cursor 回退一列并置 inclusive (即特例 2: 含末字符, 不含换行);
+    //  空行是一个 word, 空白跳跃停在它的唯一位置; 第一步就前进失败时停在原地 (不失败).
+    static OperatorWordTarget ComputeOperatorWordForward(const Buffer& buffer,
+                                                         Position origin, bool cap, size_t count);
+
 private:
     // ---- 光标的移动(一) ----
     static MotionResult ComputeLineStart(const Buffer& buffer, Position origin);            // 0

@@ -120,6 +120,26 @@ void Editor::Execute(const EditorAction& action) {
         //c{motion}/cc/C
         ExecuteChange(action);
         return;
+    case ActionKind::Yank:
+        //y{motion}/yy/Y (parser 已接通, 执行体见 ExecuteYank 的 TODO)
+        ExecuteYank(action);
+        return;
+    case ActionKind::PasteAfter:
+        //p / [count]p
+        ExecutePaste(false, action.count_);
+        return;
+    case ActionKind::PasteBefore:
+        //P / [count]P
+        ExecutePaste(true, action.count_);
+        return;
+    case ActionKind::ShiftLeft:
+        //<{motion} / <<
+        ExecuteShift(false, action);
+        return;
+    case ActionKind::ShiftRight:
+        //>{motion} / >>
+        ExecuteShift(true, action);
+        return;
     case ActionKind::DeleteCharForward:
         ExecuteDeleteChar(false, action.count_);
         return;
@@ -567,9 +587,28 @@ void Editor::ExecuteChange(const EditorAction& action) {
     Range range;
     size_t count = action.count_.value_or(1);
     if (action.motion_spec_) {
-        auto pre_range = EditEngine::ComputeRange(buffer_, cursor, desired_column, *action.motion_spec_);
-        if (!pre_range) { return; }
-        else { range = *pre_range; }
+        //README:951 课程特例 1: 光标在非空白字符上时, cw/cW 等价于 ce/cE (不包含后方空白);
+        //若光标已在空白上 (或空行唯一位置), 则按普通 w 处理 (与 vim nv_wordcmd 一致).
+        //count 语义: [count1]c[count2]w 两侧 count 相乘后作为 e/E 的 count (vim 2cw == 2ce).
+        MotionSpec spec = *action.motion_spec_;
+        bool cw_special = false;
+        if (spec.motion_ == Motion::WordForward || spec.motion_ == Motion::WordForwardCap) {
+            const std::string& line = buffer_.GetLineAt(cursor.row_);
+            if (cursor.column_ < line.size() && line[cursor.column_] != ' '
+                && line[cursor.column_] != '\t') {
+                cw_special = true;
+                bool cap = (spec.motion_ == Motion::WordForwardCap);
+                range.kind_ = RangeKind::CharacterwiseInclusive;
+                range.begin_ = cursor;
+                range.end_ = MotionEngine::ComputeChangeWordEnd(buffer_, cursor,
+                                                                cap, spec.count_.value_or(1));
+            }
+        }
+        if (!cw_special) {
+            auto pre_range = EditEngine::ComputeRange(buffer_, cursor, desired_column, spec);
+            if (!pre_range) { return; }
+            else { range = *pre_range; }
+        }
     }
     else {
         range.kind_ = RangeKind::Linewise;
@@ -684,6 +723,62 @@ void Editor::ExecuteReplace(const EditorAction& action) {
 //5. 修改了 Buffer → search_engine_.Invalidate()
 void Editor::ExecuteJoin(std::optional<size_t> count) {
     (void)count;
+}
+
+//y{motion}/yy/Y
+//TODO(拷贝与粘贴): 实现 — README:1685-1691
+//1. 组装 range: 与 ExecuteDelete 完全相同的两路 (motion_spec_ → EditEngine::ComputeRange,
+//   motion 失败 → 整条命令取消; 无 motion_spec_ (yy/Y) → Linewise 当前行起 count 行,
+//   count = action.count_.value_or(1), 超末行截断)
+//2. 空范围 (CharacterwiseExclusive 且 begin == end) → 不覆盖寄存器, 直接返回 (README:897)
+//3. 取出 range 文本 (【注意】Buffer 目前只有 EraseRange 没有"只读取文本"的接口,
+//   需新增 Buffer::GetRangeText(range) 或用行级/字符级原语拼接; Linewise 行间以 '\n' 连接),
+//   写入 register_.Set('"', text, Linewise/Characterwise), 不修改 Buffer
+//4. 光标 (README:1689-1691):
+//   - Characterwise: 停在 range.begin_ (文本序起点)
+//   - Linewise 向后复制 (range.end_.row_ 在原光标之后): 光标保持原位
+//   - Linewise 向前复制 (如 yk): 光标移到对应 motion 的目标位置,
+//     列遵循该 motion 的规则并钳到目标行合法字符位置
+//   - yy/[count]Y: 光标保持原位
+//   window_.SetCursor 更新 curswant; yank 不修改 Buffer → 不调用 search_engine_.Invalidate
+void Editor::ExecuteYank(const EditorAction& action) {
+    (void)action;
+}
+
+//p / P (before = false → 光标之后插入, true → 光标之前插入)
+//TODO(拷贝与粘贴): 实现 — README:1697-1709
+//1. 寄存器无内容 → 无效果; 取 register_.GetText('"') 与 GetType('"'),
+//   [count] 指把文本重复拼接 count 次后粘贴 (不改变寄存器内容, README:1679)
+//2. Characterwise: p 从 cursor.column_ + 1 插入, P 从 cursor.column_ 插入
+//   (从该行唯一合法位置开始插入); 光标停在最后一个被插入的字符上,
+//   最后插入的位置是空行 → 光标停在该空行唯一合法位置
+//3. Linewise: p 插入当前行之后, P 插入当前行之前 (用 buffer_.InsertLine 逐行插入,
+//   Buffer 空 (只有一行空行) 时先把 '\n' 加在文本前 (P) / 后 (p), README:1707);
+//   光标位于新插入文本第一行的第一个非空白字符 (全空白行停最后一个字符, 空行停唯一位置)
+//4. 修改了 Buffer → search_engine_.Invalidate(); [count] 拼接: charwise 直接拼接,
+//   linewise 在拼接过程中加入必要换行符 (README:1709)
+void Editor::ExecutePaste(bool before, std::optional<size_t> count) {
+    (void)before;
+    (void)count;
+}
+
+//</>{motion} 与 << //>> (right = false → 左缩进, true → 右缩进)
+//TODO(缩进): 实现 — README:1637-1663
+//1. 组装 range: 与 ExecuteDelete 相同 (motion_spec_ → ComputeRange, 失败取消;
+//   doubled (<<//>>) → Linewise 当前行起 count 行, 两侧 count 乘积是【行数】不是缩进级数)
+//2. motion 失败或 Characterwise range 为空 → 无效果 (README:1649)
+//3. 处理 range 中实际包含字符或换行的所有文本行:
+//   - Exclusive range 终点恰为较后行的第 0 列 → 不包含该终点行; Linewise 包含所有行 (含空行)
+//   - 每行前导空白 (空格/Tab) 的宽度 W: 右移 → W + 4 个 space; 左移 → max(0, W - 4) 个 space
+//     (用 TextLayout 的显示宽度辅助函数换算, 处理 Tab 展开)
+//   - 真正空行保持为空; 只有空白的非空行同样按宽度规则处理
+//   - 非前导空白与正文完全不变
+//4. 成功得到至少包含一行的范围后: 光标移到第一条受影响行, 列遵循 ^ 的规则
+//   (即使该次没有改变文本); 不写 register (README:1663)
+//5. 修改了 Buffer → search_engine_.Invalidate()
+void Editor::ExecuteShift(bool right, const EditorAction& action) {
+    (void)right;
+    (void)action;
 }
 
 //~/[count]~

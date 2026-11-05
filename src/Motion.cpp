@@ -430,6 +430,108 @@ MotionResult MotionEngine::ComputeWordBackwardEnd(const Buffer& buffer, Position
     return MakeResult(pos, RangeKind::CharacterwiseInclusive);
 }
 
+//cw/cW 特例 (契约见 Motion.hpp): vim end_word(count, bigword, stop=true) 的移植.
+//与 vim 的差异: vim 在找不到下一位置时 motion 失败, 本实现按 MiniVim e 的 README 约定
+//停在最后到达的位置 (OJ 实测 5cw 超界时 vim 经 adjust_cursor 也停在最后字符, 结果一致).
+Position MotionEngine::ComputeChangeWordEnd(const Buffer& buffer, Position origin,
+                                            bool cap, size_t count) {
+    Position pos = origin;
+    bool stop = true; // 只在第一步生效 (vim: 站在词尾按 cw 只改一个字符)
+    for (size_t i = 0; i < count; ++i) {
+        int sclass = Classify(buffer, pos, cap); // 调用方保证起点是非空白字符
+        //1. 判断光标是否已在 word 末字符: 行内下一个位置不是同类, 或已在行尾 (word 不跨行)
+        Position next = pos;
+        bool at_word_end = !StepForwardInLine(buffer, next)
+            || Classify(buffer, next, cap) != sclass;
+        if (!at_word_end) {
+            //2. 光标在 word 内部: 走到该 word 的末字符 (不跨行)
+            pos = next;
+            while (StepForwardInLine(buffer, next) && Classify(buffer, next, cap) == sclass) {
+                pos = next;
+            }
+        } else if (!stop || sclass == 0) {
+            //3. 从 word 末字符出发: 与 e 相同, 跳到下一个 word 的末字符
+            //   (NextWordEnd 的"光标已在末字符"分支正好走"找下一个 word"路径);
+            //   已到边界 (e 停住不再移动) 时提前结束, 不空转超大 count (README:730)
+            Position next = NextWordEnd(buffer, pos, cap);
+            if (!stop && next == pos) { break; }
+            pos = next;
+        }
+        //else: stop 特例 —— 光标已在 word 末字符, 本步不移动
+        stop = false;
+    }
+    return pos;
+}
+
+namespace {
+
+//vim inc() 的移植: 前进一格, 可从行尾字符进到该行 NUL 位置 (column_ == 行长),
+//再从 NUL 跨到下一行行首; 返回值与 vim inc() 一致 (misc2.c:347):
+//  0 = 行内前进 (下一字符非 NUL), 2 = 前进到行尾 NUL 位置, 1 = 跨到下一行行首, -1 = EOF.
+//operator 的 w 用返回值 2 区分"停在行尾 NUL"与"跨行" (vim fwd_word 的 eol 语义).
+int StepForwardNul(const Buffer& buffer, Position& pos) {
+    const std::string& line = buffer.GetLineAt(pos.row_);
+    if (pos.column_ < line.size()) {
+        ++pos.column_;
+        return (pos.column_ < line.size()) ? 0 : 2; // 落到 NUL 位置 → 2
+    }
+    if (pos.row_ + 1 < buffer.GetLineCount()) {
+        ++pos.row_;
+        pos.column_ = 0;
+        return 1;
+    }
+    return -1;
+}
+
+//vim cls() 的移植: NUL 位置 (column_ == 行长, 含空行唯一位置) 按空白处理;
+//其余位置用本文件的 Classify (0 = 空白, 1 = word 字符, 2 = 标点).
+int ClassifyNul(const Buffer& buffer, const Position& pos, bool cap) {
+    const std::string& line = buffer.GetLineAt(pos.row_);
+    if (pos.column_ >= line.size()) { return 0; }
+    return Classify(buffer, pos, cap);
+}
+
+} // namespace
+
+//operator 的 w/W (契约见 Motion.hpp): vim fwd_word(count, bigword, eol=true) 的移植.
+MotionEngine::OperatorWordTarget MotionEngine::ComputeOperatorWordForward(
+        const Buffer& buffer, Position origin, bool cap, size_t count) {
+    Position pos = origin;
+    for (size_t iter = 0; iter < count; ++iter) {
+        bool last_iter = (iter == count - 1);
+        int sclass = ClassifyNul(buffer, pos, cap);
+        //1. 前进一格 (vim: 第一步失败 → FAIL; MiniVim 约定停在原地不失败)
+        int step = StepForwardNul(buffer, pos);
+        if (step == -1) { break; }
+        if (step >= 1 && last_iter) { break; } // eol: 最后一步跨行 → 停在下一行行首
+        //2. 越过当前 word 的剩余部分 (光标在空白/空行/NUL 时跳过)
+        if (sclass != 0) {
+            while (ClassifyNul(buffer, pos, cap) == sclass) {
+                step = StepForwardNul(buffer, pos);
+                if (step == -1) { break; }        // EOF → 停在行尾 NUL 位置
+                if (step >= 1 && last_iter) { break; } // eol → 停在下一行行首
+            }
+        }
+        //3. 越过空白 (空行是一个 word, 停其唯一位置; eol 时不跨过换行)
+        while (ClassifyNul(buffer, pos, cap) == 0) {
+            if (pos.column_ == 0 && buffer.GetLineAt(pos.row_).empty()) { break; }
+            step = StepForwardNul(buffer, pos);
+            if (step == -1) { break; }        // EOF → 停在行尾 NUL 位置
+            if (step >= 1 && last_iter) { break; } // eol → 停在下一行行首
+        }
+    }
+    //4. vim adjust_cursor: 停在行尾 NUL 且列 > 0 → 回退一列并 inclusive
+    //   (README:952 特例 2: 范围含该 word 末字符, 不包含换行符)
+    OperatorWordTarget result;
+    result.target_ = pos;
+    if (origin < pos && pos.column_ > 0
+        && pos.column_ >= buffer.GetLineAt(pos.row_).size()) {
+        --result.target_.column_;
+        result.inclusive_ = true;
+    }
+    return result;
+}
+
 //G: 无 count 跳到文件最后一行; [count]G 跳到第 count 行 (行号从 1 开始, 1G 是第一行).
 //  行号超过文件总行数时都到文件最后一行.
 //  到目标行后光标停在第一个非空白字符; 行内全为空白停在最后一个字符; 空行停在该行唯一位置;

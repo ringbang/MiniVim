@@ -74,6 +74,12 @@ private:
     void ExecuteReplace(const EditorAction& action); // r / [count]r
     void ExecuteJoin(std::optional<size_t> count);   // J / [count]J
     void ExecuteFlipCase(std::optional<size_t> count); // ~ / [count]~
+    //拷贝与粘贴 (README:1665-1709): y{motion}/yy/Y 写入 register, p/P 从 register 插入
+    //(parser 与 dispatch 已接通, 执行体待实现)
+    void ExecuteYank(const EditorAction& action);
+    void ExecutePaste(bool before, std::optional<size_t> count);
+    //缩进 (README:1629-1663): </>{motion} 与 doubled << //>> (parser 与 dispatch 已接通, 执行体待实现)
+    void ExecuteShift(bool right, const EditorAction& action);
     //插入会话机制 (接口联动, 已实现): 记录有效操作与 [count] 回放
     void RecordInsertOp(InsertOp op);
     void ApplyInsertOp(const InsertOp& op); // 在光标处重放一个操作 (不重复记录)

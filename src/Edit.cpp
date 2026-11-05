@@ -41,6 +41,20 @@ std::optional<Range> EditEngine::ComputeRange(const Buffer& buffer, Position ori
             range.end_ = {std::min(origin.row_ + count, buffer.GetLineCount() - 1), 0};
             range.kind_ = RangeKind::Linewise;
             return range;
+        case Motion::WordForward:
+        case Motion::WordForwardCap: {
+            //w/W 与 operator 搭配: vim fwd_word(eol=true) 语义 + 特例 2 (README:952):
+            //停到行尾时范围含该 word 的末字符但不含换行 (inclusive), 不延伸到下一行
+            //(纯移动的 w 不走这里, 语义不同, 见 ComputeOperatorWordForward 的注释)
+            bool cap = (spec.motion_ == Motion::WordForwardCap);
+            auto target = MotionEngine::ComputeOperatorWordForward(
+                buffer, origin, cap, count);
+            range.begin_ = origin; // w 只向前, target >= origin 恒成立
+            range.end_ = target.target_;
+            range.kind_ = target.inclusive_ ? RangeKind::CharacterwiseInclusive
+                                            : RangeKind::CharacterwiseExclusive;
+            return range;
+        }
         default:
             break; // 其余 motion 走 MotionEngine
         }

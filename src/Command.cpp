@@ -8,6 +8,33 @@ bool IsDigit(char value) {
     return value >= '0' && value <= '9';
 }
 
+//count 追加一位数字; 超过 COUNT_MAX 时钳至上限并继续吞掉后面的数字 (README:730, hint 1)
+size_t AppendCountDigit(size_t count, char digit) {
+    size_t d = static_cast<size_t>(digit - '0');
+    if (count > (COUNT_MAX - d) / 10) { return COUNT_MAX; }
+    return count * 10 + d;
+}
+
+//operator 两侧 count 相乘 (缺省为 1), 溢出时饱和到 COUNT_MAX (README:730)
+size_t MultiplyCounts(std::optional<size_t> a, std::optional<size_t> b) {
+    size_t x = a.value_or(1);
+    size_t y = b.value_or(1);
+    if (x != 0 && y > COUNT_MAX / x) { return COUNT_MAX; }
+    return x * y;
+}
+
+//键 → operator 的 ActionKind (d/c/y/</>); 其他键返回 nullopt
+std::optional<ActionKind> OperatorKind(char value) {
+    switch (value) {
+    case 'd': return ActionKind::Delete;
+    case 'c': return ActionKind::Change;
+    case 'y': return ActionKind::Yank;
+    case '<': return ActionKind::ShiftLeft;
+    case '>': return ActionKind::ShiftRight;
+    default: return std::nullopt;
+    }
+}
+
 } // namespace
 
 std::optional<EditorAction> NormalModeParser::Feed(KeyEvent key) {
@@ -83,10 +110,21 @@ std::optional<EditorAction> NormalModeParser::FeedNormal(char value) {
         return std::nullopt;
     case 'd':
     case 'c':
-        //operator 前缀: 等待 motion (含 dd/cc 与 D/C)
-        pending_operator_ = (value == 'd') ? ActionKind::Delete : ActionKind::Change;
+    case 'y':
+    case '<':
+    case '>':
+        //operator 前缀: 等待 motion (含 doubled 形式 dd/cc/yy/<<//>> 与 D/C)
+        pending_operator_ = OperatorKind(value);
         state_ = State::OperatorPending;
         return std::nullopt;
+    case 'Y':
+        //Y = yy: 当前行 linewise 复制 (无 motion_spec_, count_ 为空, 与 dd 同形)
+        return EditorAction{ActionKind::Yank, std::nullopt, std::nullopt,
+                            std::nullopt, std::nullopt};
+    case 'p':
+        return GenerateCommand(ActionKind::PasteAfter);
+    case 'P':
+        return GenerateCommand(ActionKind::PasteBefore);
     case 'x': return GenerateCommand(ActionKind::DeleteCharForward);
     case 'X': return GenerateCommand(ActionKind::DeleteCharBackward);
     case 'D': return GenerateOperator(ActionKind::Delete, Motion::LineEnd);  // D = d$
@@ -111,9 +149,10 @@ std::optional<EditorAction> NormalModeParser::FeedNormal(char value) {
 }
 
 std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
-    //已开始输入 count 时, 后续的 0 也属于 count (README:1048)
+    //已开始输入 count 时, 后续的 0 也属于 count (README:1048);
+    //超过 COUNT_MAX 时钳至上限并继续消费数字 (README:730, hint 1)
     if (IsDigit(value)) {
-        *pending_count_ = *pending_count_ * 10 + static_cast<size_t>(value - '0');
+        *pending_count_ = AppendCountDigit(*pending_count_, value);
         return std::nullopt;
     }
     //count 后接 g 前缀时保留 count, 等待第二个键 (如 2ge、3gg)
@@ -154,12 +193,24 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
     case '?': action = GenerateCommand(ActionKind::EnterSearchBackward, pending_count_); break;
     case 'd':
     case 'c':
+    case 'y':
+    case '<':
+    case '>':
         //operator 前缀带 count: 保存为 operator count, 等待 motion
-        pending_operator_ = (value == 'd') ? ActionKind::Delete : ActionKind::Change;
+        pending_operator_ = OperatorKind(value);
         pending_operator_count_ = pending_count_;
         pending_count_.reset();
         state_ = State::OperatorPending;
         return std::nullopt; // 注意不走下面的 Reset
+    case 'Y': {
+        //[count]Y = [count]yy: linewise 复制 count 行 (与 dd 同形)
+        EditorAction act;
+        act.kind_ = ActionKind::Yank;
+        act.count_ = pending_count_;
+        return act; // 走下面的 Reset
+    }
+    case 'p': action = GenerateCommand(ActionKind::PasteAfter, pending_count_); break;
+    case 'P': action = GenerateCommand(ActionKind::PasteBefore, pending_count_); break;
     case 'x': action = GenerateCommand(ActionKind::DeleteCharForward, pending_count_); break;
     case 'X': action = GenerateCommand(ActionKind::DeleteCharBackward, pending_count_); break;
     case 'D': action = GenerateOperator(ActionKind::Delete, Motion::LineEnd, pending_count_); break; // [count]D = [count]d$
@@ -286,8 +337,14 @@ std::optional<EditorAction> NormalModeParser::CompleteOperator(char value, std::
     case 'C':
         return GenerateOperator(*pending_operator_, Motion::LineEnd, count);
     case 'd':
-    case 'c': {
-        //doubled 形式 (dd/cc): 整行 linewise, motion_spec_ 缺省, count 为最终 count
+    case 'c':
+    case 'y':
+    case '<':
+    case '>': {
+        //doubled 形式 (dd/cc/yy/<<//>>): 整行 linewise, motion_spec_ 缺省, count 为最终 count;
+        //只有与 pending operator 相同的键才算 doubled (vim 实测 d< / dc 取消命令),
+        //其余情况返回 nullopt 由调用方取消
+        if (OperatorKind(value) != *pending_operator_) { return std::nullopt; }
         EditorAction act;
         act.kind_ = *pending_operator_;
         act.count_ = count;
@@ -321,7 +378,7 @@ std::optional<EditorAction> NormalModeParser::FeedOperator(char value) {
 //OperatorCount 的收尾: 数字继续拼 motion count, 其余同 FeedOperator (count 相乘)
 std::optional<EditorAction> NormalModeParser::FeedOperatorCount(char value) {
     if (IsDigit(value)) {
-        *pending_count_ = *pending_count_ * 10 + static_cast<size_t>(value - '0');
+        *pending_count_ = AppendCountDigit(*pending_count_, value);
         return std::nullopt;
     }
     if (value == 'g') {
@@ -329,10 +386,10 @@ std::optional<EditorAction> NormalModeParser::FeedOperatorCount(char value) {
         state_ = State::OperatorPrefixPending;
         return std::nullopt;
     }
-    //两侧 count 相乘 ([count1]d[count2]w)
+    //两侧 count 相乘 ([count1]d[count2]w), 溢出饱和到 COUNT_MAX (README:730)
     std::optional<size_t> count;
     if (pending_count_ || pending_operator_count_) {
-        count = pending_count_.value_or(1) * pending_operator_count_.value_or(1);
+        count = MultiplyCounts(pending_count_, pending_operator_count_);
     }
     std::optional<EditorAction> action = CompleteOperator(value, count);
     Reset();
@@ -343,7 +400,7 @@ std::optional<EditorAction> NormalModeParser::FeedOperatorCount(char value) {
 std::optional<EditorAction> NormalModeParser::FeedOperatorPrefix(char value) {
     std::optional<size_t> count;
     if (pending_count_ || pending_operator_count_) {
-        count = pending_count_.value_or(1) * pending_operator_count_.value_or(1);
+        count = MultiplyCounts(pending_count_, pending_operator_count_);
     }
     std::optional<EditorAction> action;
     switch (value) {

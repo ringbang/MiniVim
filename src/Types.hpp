@@ -11,6 +11,10 @@ Types.hpp
 
 namespace sjtu {
 
+//count 上限 (README:730): 追加数字前检查溢出并钳至上限; 达到上限后仍继续消费数字,
+//不能把余下数字当成下一条命令. operator 两侧 count 相乘同样要先检查溢出并饱和.
+constexpr size_t COUNT_MAX = 1000000;
+
 struct Position {
     //Buffer 中的行号和字符下标; 插入模式的 column_ 可以等于该行长度
     size_t row_{0};
