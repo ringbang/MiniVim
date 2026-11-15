@@ -30,6 +30,7 @@ public:
     const Position& GetCursor() const ;
     const Viewport& GetViewport() const ;
     const size_t& GetDesiredColumn() const ;
+    void ScrollCursorLine(const Buffer& buffer, char kind, std::optional<size_t> count);
 
 private:
     void MoveLeft(const Buffer& buffer, size_t count);

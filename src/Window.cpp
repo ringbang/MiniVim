@@ -94,6 +94,37 @@ void Window::EnsureCursorVisible(const Buffer& buffer) {
     if (render_column > viewport_.left_ + viewport_.columns_ - 1) viewport_.left_ = render_column - viewport_.columns_ + 1;
 }
 
+void Window::ScrollCursorLine(const Buffer& buffer, char kind, std::optional<size_t> count) {
+    //  [count] 给定 → 光标先跳到第 count 行 (钳到末行; 列保持并钳到目标行末, vim 实测),
+    //                 curswant 更新为落地字符的显示列;
+    //  无 count → 光标与 curswant 完全不变.
+    //  然后只调整视口 top_, 使当前行对齐正文顶部/中间/底部; 不碰 left_, 不调 EnsureCursorVisible
+    //  (构造保证光标在新视口内).
+    if (count) {
+        size_t target = (*count > 0) ? *count - 1 : 0;
+        cursor_.row_ = std::min(target, buffer.GetLineCount() - 1);
+        const std::string& line = buffer.GetLineAt(cursor_.row_);
+        size_t max_col = line.empty() ? 0 : line.size() - 1;
+        cursor_.column_ = std::min(cursor_.column_, max_col);
+        desired_column_ = CursorCellColumn(line, cursor_.column_);
+    }
+
+    //对齐偏移: t → 0; z → (H-1)/2 (偶数高度取靠上的中间行); b → H-1
+    size_t H = viewport_.rows_;
+    size_t offset = 0;
+    if (kind == 'z') {
+        offset = (H - 1) / 2;
+    }
+    else if (kind == 'b') {
+        offset = H - 1;
+    } 
+
+    //top_ 钳到 [0, N-1]
+    size_t N = buffer.GetLineCount();
+    viewport_.top_ = (cursor_.row_ >= offset) ? cursor_.row_ - offset : 0;
+    viewport_.top_ = std::min(viewport_.top_, N - 1);
+}
+
 const Position& Window::GetCursor() const {
     //返回当前光标位置的只读引用
     return cursor_;

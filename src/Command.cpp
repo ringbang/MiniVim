@@ -99,6 +99,7 @@ std::optional<EditorAction> NormalModeParser::FeedNormal(char value) {
     case '$': return GenerateMotion(Motion::LineEnd);
     case 'G': return GenerateMotion(Motion::GotoLine);
     case 'g':
+    case 'z':
         //g 前缀, 等待第二个键 (ge/gE/gg); z 前缀 (zt/zz/zb) 在窗口操作章节复用本状态
         pending_prefix_ = 'g';
         state_ = State::PrefixPending;
@@ -163,7 +164,7 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
         return std::nullopt;
     }
     //count 后接 g 前缀时保留 count, 等待第二个键 (如 2ge、3gg)
-    if (value == 'g') {
+    if (value == 'g' || value == 'z') {
         pending_prefix_ = 'g';
         state_ = State::PrefixPending;
         return std::nullopt;
@@ -244,14 +245,26 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
 std::optional<EditorAction> NormalModeParser::FeedPrefix(char value) {
     //目前只有 g 前缀 (ge/gE/gg); pending 的 count 一并生效 (如 2ge 是执行两次 ge, 3gg 是跳到第 3 行)
     std::optional<EditorAction> action;
-    switch (value) {
-    case 'e': action = GenerateMotion(Motion::WordBackwardEnd, pending_count_); break;
-    case 'E': action = GenerateMotion(Motion::WordBackwardEndCap, pending_count_); break;
-    case 'g': action = GenerateMotion(Motion::GotoFirstLine, pending_count_); break;
-    default:
-        //g 后跟其他键: 取消并丢弃
-        action = std::nullopt;
-        break;
+    if (pending_prefix_ == 'z') {
+        // zt/zz/zb
+        if (value == 't' || value == 'z' || value == 'b') {
+            EditorAction act;
+            act.kind_ = ActionKind::Scroll;
+            act.count_ = pending_count_;
+            act.arg_ = value;
+            action =act;
+        }
+    }
+    else {
+        switch (value) {
+        case 'e': action = GenerateMotion(Motion::WordBackwardEnd, pending_count_); break;
+        case 'E': action = GenerateMotion(Motion::WordBackwardEndCap, pending_count_); break;
+        case 'g': action = GenerateMotion(Motion::GotoFirstLine, pending_count_); break;
+        default:
+            //g 后跟其他键: 取消并丢弃
+            action = std::nullopt;
+            break;
+        }
     }
     Reset();
     return action;

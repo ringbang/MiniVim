@@ -229,6 +229,10 @@ void Editor::Execute(const EditorAction& action) {
             if (mark) window_.JumpTo(buffer_, *mark);
         }
         return;
+    case ActionKind::Scroll:
+        //zt/zz/zb: 只动视口 (与光标), 不修改 Buffer/register
+        window_.ScrollCursorLine(buffer_, action.arg_.value_or('t'), action.count_);
+        return;
     }
 }
 
