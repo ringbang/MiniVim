@@ -370,6 +370,25 @@ std::string Buffer::EraseLine(std::size_t row) {
     return res;
 }
 
+//在 (row, column) 处插入文本 (契约见 Buffer.hpp)
+Position Buffer::InsertText(std::size_t row, std::size_t column, const std::string& text) {
+    Position pos{row, column};
+    Position last = pos;
+    for (char c : text) {
+        if (c == '\n') {
+            SplitLine(pos.row_, pos.column_);
+            ++pos.row_;
+            pos.column_ = 0;
+        }
+        else {
+            InsertCharacter(pos.row_, pos.column_, c);
+            last = pos;
+            ++pos.column_;
+        }
+    }
+    return last; // 最后一个被插入字符的位置 (text 为空时是插入点)
+}
+
 void Buffer::AdjustMarksInsertLine(std::size_t row) {
     //TODO(光标的移动二): 实现
     //位置在 row 处及以下的标记整体下移一行 (README: 在标记位置及之前插入完整行, 标记随原文本后移)

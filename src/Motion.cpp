@@ -509,8 +509,11 @@ MotionEngine::OperatorWordTarget MotionEngine::ComputeOperatorWordForward(
             while (ClassifyNul(buffer, pos, cap) == sclass) {
                 step = StepForwardNul(buffer, pos);
                 if (step == -1) { break; }        // EOF → 停在行尾 NUL 位置
-                if (step >= 1 && last_iter) { break; } // eol → 停在下一行行首
+                if (step >= 1 && last_iter) { break; } // eol → 停在行尾 NUL 位置
             }
+            //eol break 必须退出整个 for (vim 的 return OK): 不能落入下面的空白跳跃,
+            //否则会跨过换行 (测试点: y2w/d2w 于行尾词时范围多含一个换行)
+            if (step >= 1 && last_iter) { break; }
         }
         //3. 越过空白 (空行是一个 word, 停其唯一位置; eol 时不跨过换行)
         while (ClassifyNul(buffer, pos, cap) == 0) {

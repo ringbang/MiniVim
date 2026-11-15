@@ -76,6 +76,12 @@ public:
     //(README: 标记所在行被删除则标记丢失), 其下标记上移一行
     std::string EraseLine(std::size_t row);
 
+    // ---- 粘贴 ----
+    //在 (row, column) 处插入文本 (可含 '\n', 按行拆分; column 允许等于行长, 表示行尾插入):
+    //'\n' → SplitLine 并在新行行首继续, 其余字符 → InsertCharacter 并后移一列.
+    //返回最后一个被插入字符的位置 (text 为空时返回插入点); 标记维护随两个原语自动生效.
+    Position InsertText(std::size_t row, std::size_t column, const std::string& text);
+
 private:
     void WriteTo(const std::filesystem::path& path) const;
 

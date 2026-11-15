@@ -821,20 +821,48 @@ void Editor::ExecuteYank(const EditorAction& action) {
 }
 
 //p / P (before = false → 光标之后插入, true → 光标之前插入)
-//TODO(拷贝与粘贴): 实现 — README:1697-1709
-//1. 寄存器无内容 → 无效果; 取 register_.GetText('"') 与 GetType('"'),
-//   [count] 指把文本重复拼接 count 次后粘贴 (不改变寄存器内容, README:1679)
-//2. Characterwise: p 从 cursor.column_ + 1 插入, P 从 cursor.column_ 插入
-//   (从该行唯一合法位置开始插入); 光标停在最后一个被插入的字符上,
-//   最后插入的位置是空行 → 光标停在该空行唯一合法位置
-//3. Linewise: p 插入当前行之后, P 插入当前行之前 (用 buffer_.InsertLine 逐行插入,
-//   Buffer 空 (只有一行空行) 时先把 '\n' 加在文本前 (P) / 后 (p), README:1707);
-//   光标位于新插入文本第一行的第一个非空白字符 (全空白行停最后一个字符, 空行停唯一位置)
-//4. 修改了 Buffer → search_engine_.Invalidate(); [count] 拼接: charwise 直接拼接,
-//   linewise 在拼接过程中加入必要换行符 (README:1709)
 void Editor::ExecutePaste(bool before, std::optional<size_t> count) {
-    (void)before;
-    (void)count;
+    //1. 寄存器无内容 → 无效果 (粘贴不改变寄存器内容, README:1679)
+    if (!register_.Has(Register::kUnnamed)) { return; }
+    const std::string& text = register_.GetText(Register::kUnnamed);
+    RangeType type = register_.GetType(Register::kUnnamed);
+    size_t times = count.value_or(1);
+    Position cursor = window_.GetCursor();
+
+    //2. [count] 拼接: charwise 直接拼接, linewise 在拷贝之间加入换行 (README:1709)
+    std::string full;
+    for (size_t i = 0; i < times; ++i) {
+        if (i > 0 && type == RangeType::Linewise) { full += '\n'; }
+        full += text;
+    }
+
+    if (type == RangeType::Characterwise) {
+        //3. charwise: p 从光标之后插入, P 从光标处插入 (空行上都落在唯一位置);
+        //   光标停在最后一个被插入的字符上 (README:1697-1699)
+        const std::string& line = buffer_.GetLineAt(cursor.row_);
+        size_t col = before ? cursor.column_
+                            : std::min(cursor.column_ + 1, line.size());
+        Position last = buffer_.InsertText(cursor.row_, col, full);
+        window_.JumpTo(buffer_, last);
+    }
+    else {
+        //4. linewise: p 插入当前行之后, P 之前 —— 文本首/尾补 '\n' 后一次 InsertText 完成;
+        //   空 Buffer 时自然形成 README:1707 的 "文本前/后添加换行符" (OJ 实测与 vim 一致)
+        if (before) {
+            buffer_.InsertText(cursor.row_, 0, full + '\n');
+        }
+        else {
+            buffer_.InsertText(cursor.row_, buffer_.GetLineAt(cursor.row_).size(),
+                               '\n' + full);
+        }
+        //光标: 新插入文本第一行的 ^ 位置 (README:1701-1705;
+        //全空白行停最后一个字符, 空行停唯一位置 —— LineJumpTarget 正是此规则)
+        Position target = MotionEngine::LineJumpTarget(
+            buffer_, before ? cursor.row_ : cursor.row_ + 1);
+        window_.JumpTo(buffer_, target);
+    }
+    //5. 修改了 Buffer → 搜索缓存失效
+    search_engine_.Invalidate();
 }
 
 //</>{motion} 与 << //>> (right = false → 左缩进, true → 右缩进)
