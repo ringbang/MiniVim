@@ -386,7 +386,12 @@ Position Buffer::InsertText(std::size_t row, std::size_t column, const std::stri
             ++pos.column_;
         }
     }
-    return last; // 最后一个被插入字符的位置 (text 为空时是插入点)
+    //文本以 '\n' 结尾且拆分出的新行为【空行】: 最后插入的位置是空行,
+    //光标位于该空行唯一合法位置 (README:1699); 新行非空 (如行中 P) 时
+    //光标仍是最后一个被插入字符的位置
+    if (!text.empty() && text.back() == '\n'
+        && lines_[pos.row_].empty()) { return pos; }
+    return last; // 否则是最后一个被插入字符的位置 (text 为空时是插入点)
 }
 
 void Buffer::AdjustMarksInsertLine(std::size_t row) {

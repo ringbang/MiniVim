@@ -761,20 +761,26 @@ void Editor::ExecuteYank(const EditorAction& action) {
         range = *pre_range;
     }
     else {
-        // yy / Y: linewise 当前行起 count 行
+        // yy / Y: vim nv_lineop 语义 (OJ 实测) —— 光标已在末行且 count > 1 时
+        // cursor_down(count-1) 失败, 整条命令取消 (不写寄存器); 其余情况行数不足按
+        // 截断处理 (vim 的 cursor_down 会钳到末行, 如 2y3y 在 2 行文件上复制 2 行)
+        if (count > 1 && cursor.row_ == buffer_.GetLineCount() - 1) { return; }
         range.kind_ = RangeKind::Linewise;
         range.begin_ = {cursor.row_, 0};
         range.end_ = {std::min(cursor.row_ + count - 1, buffer_.GetLineCount() - 1), 0};
     }
 
-    // 2. 空范围 (CharacterwiseExclusive 且 begin == end) → 不覆盖寄存器, 直接返回 (README:897)
+    // 2. 空范围 (CharacterwiseExclusive 且 begin == end, 或空行上的 inclusive [x,x])
+    //   → vim 实测把 unnamed register 置为空 charwise (后续 p 无内容可贴);
+    //   motion 失败 (上面已 return) 才是"整条命令取消、不碰寄存器"
     bool empty = (range.kind_ == RangeKind::CharacterwiseExclusive && range.begin_ == range.end_);
-    // Inclusive [x,x] 在【空行】上也没有字符 
+    // Inclusive [x,x] 在【空行】上也没有字符
     if (!empty && range.kind_ == RangeKind::CharacterwiseInclusive && range.begin_ == range.end_
         && buffer_.GetLineAt(range.begin_.row_).empty()) {
             empty = true;
         }
     if (empty) {
+        register_.Set(Register::kUnnamed, "", RangeType::Characterwise);
         return;
     }
 
@@ -826,6 +832,10 @@ void Editor::ExecutePaste(bool before, std::optional<size_t> count) {
     if (!register_.Has(Register::kUnnamed)) { return; }
     const std::string& text = register_.GetText(Register::kUnnamed);
     RangeType type = register_.GetType(Register::kUnnamed);
+    //空范围 yank 会把 charwise 寄存器置为空 (见 ExecuteYank): p 无内容可贴,
+    //光标也不动 (vim 实测: y_size == 0 → "nothing in register", 无任何效果);
+    //linewise 空文本 (yy 空行) 仍要贴出一个空行, 不在此列
+    if (type == RangeType::Characterwise && text.empty()) { return; }
     size_t times = count.value_or(1);
     Position cursor = window_.GetCursor();
 
