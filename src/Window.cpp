@@ -106,7 +106,7 @@ void Window::ScrollCursorLine(const Buffer& buffer, char kind, std::optional<siz
         const std::string& line = buffer.GetLineAt(cursor_.row_);
         size_t max_col = line.empty() ? 0 : line.size() - 1;
         cursor_.column_ = std::min(cursor_.column_, max_col);
-        desired_column_ = CursorCellColumn(line, cursor_.column_);
+        //curswant 保留不重算 (vim 实测: [count]zt 只钳列, 不动 curswant; OJ 测试点 "retained desired column")
     }
 
     //对齐偏移: t → 0; z → (H-1)/2 (偶数高度取靠上的中间行); b → H-1
@@ -123,6 +123,68 @@ void Window::ScrollCursorLine(const Buffer& buffer, char kind, std::optional<siz
     size_t N = buffer.GetLineCount();
     viewport_.top_ = (cursor_.row_ >= offset) ? cursor_.row_ - offset : 0;
     viewport_.top_ = std::min(viewport_.top_, N - 1);
+}
+
+//<C-e>/<C-y>/<C-d>/<C-u> (README:1799-1803, vim 9.1 实测):
+//  kind: 'e' = 下滚单行, 'y' = 上滚单行, 'd' = 下滚半屏, 'u' = 上滚半屏
+//  C-e/C-y: top 按 min(N, top+count) / max(1, top-count) (1 基); 光标保护:
+//    被挤出可见区间 [top, min(N, top+H-1)] 时移到最近行, 列按原 curswant 选 (README:1803)
+//  C-d/C-u: S = max(1, H/2) 或 count (钳到 H, vim 实测); top 下滚 min(S, room) (room =
+//    底部剩余空行), 光标同步下移 S (钳到末行); 上滚对称; 光标已在边界 → 整条命令无效果;
+//    完成后光标列归 0、curswant 归 0 (vim halfpage 的 beginline(BL_SOL|BL_FIX))
+void Window::ScrollView(const Buffer& buffer, char kind, std::optional<size_t> count) {
+    size_t N = buffer.GetLineCount();
+    size_t H = viewport_.rows_;
+    bool down = (kind == 'e' || kind == 'd');
+    bool half = (kind == 'd' || kind == 'u');
+    size_t S = count.value_or(0);
+    if (half) {
+        if (S == 0) S = std::max<size_t>(1, H / 2);
+        else S = std::min(S, H);
+        //已在边界: 无效果 (vim nv_halfpage 实测: C-d 在末行 / C-u 在首行直接 beep 返回)
+        if ((kind == 'd' && cursor_.row_ == N - 1) || (kind == 'u' && cursor_.row_ == 0)) {
+            return;
+        }
+    } else {
+        if (S == 0) S = 1;
+    }
+
+    if (down) {
+        if (half) {
+            //room = 底部到文件末尾的空行数 (1 基 botline = top_+H, 0 基换算)
+            size_t bot = viewport_.top_ + H;
+            size_t room = (N > bot) ? N - bot : 0;
+            viewport_.top_ += std::min(S, room);
+            cursor_.row_ = std::min(cursor_.row_ + S, N - 1);
+        } else {
+            //C-e: top = min(N, top + count) (1 基)
+            viewport_.top_ = std::min(viewport_.top_ + S, N - 1);
+        }
+    } else {
+        if (half) {
+            viewport_.top_ = (viewport_.top_ >= S) ? viewport_.top_ - S : 0;
+            cursor_.row_ = (cursor_.row_ >= S) ? cursor_.row_ - S : 0;
+        } else {
+            viewport_.top_ = (viewport_.top_ >= S) ? viewport_.top_ - S : 0;
+        }
+    }
+
+    if (half) {
+        //光标列归 0, curswant 归 0 (vim halfpage 的 beginline)
+        cursor_.column_ = 0;
+        desired_column_ = 0;
+        return;
+    }
+    //C-e/C-y 光标保护 (README:1803): 挤出可见区间 → 移到最近行
+    size_t lo = viewport_.top_;
+    size_t hi = std::min(N - 1, viewport_.top_ + H - 1);
+    if (cursor_.row_ < lo) cursor_.row_ = lo;
+    else if (cursor_.row_ > hi) cursor_.row_ = hi;
+    //按原 curswant 选列 (短行停在行末, 空行唯一合法位置)
+    const std::string& line = buffer.GetLineAt(cursor_.row_);
+    size_t col = RenderColumnToBufferColumn(line, desired_column_);
+    if (!line.empty() && col >= line.size()) col = line.size() - 1;
+    cursor_.column_ = col;
 }
 
 const Position& Window::GetCursor() const {

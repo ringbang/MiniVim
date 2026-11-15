@@ -229,10 +229,16 @@ void Editor::Execute(const EditorAction& action) {
             if (mark) window_.JumpTo(buffer_, *mark);
         }
         return;
-    case ActionKind::Scroll:
-        //zt/zz/zb: 只动视口 (与光标), 不修改 Buffer/register
-        window_.ScrollCursorLine(buffer_, action.arg_.value_or('t'), action.count_);
+    case ActionKind::Scroll: {
+        //zt/zz/zb 与 <C-e>/<C-y>/<C-d>/<C-u>: 只动视口 (与光标), 不修改 Buffer/register
+        char kind = action.arg_.value_or('t');
+        if (kind == 't' || kind == 'z' || kind == 'b') {
+            window_.ScrollCursorLine(buffer_, kind, action.count_);
+        } else {
+            window_.ScrollView(buffer_, kind, action.count_);
+        }
         return;
+    }
     }
 }
 

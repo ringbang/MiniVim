@@ -27,10 +27,14 @@ public:
     //搜索/标记/跳转类命令共用的"直接落到指定位置": 按 Normal 范围钳制行列,
     //更新 curswant 为落地字符的显示列 (落在 Tab 上时取 Tab 的最后一格, 与 SetToTarget 一致), 并保证光标可见
     void JumpTo(const Buffer& buffer, Position position);
+    //zt/zz/zb (README:1798-1808): 调整视口 top_ 使当前行对齐顶部/中间/底部;
+    //[count] 时先跳到第 count 行 (列保持并钳制, curswant 保留不重算——vim 实测), 无 count 时光标与 curswant 不动
+    void ScrollCursorLine(const Buffer& buffer, char kind, std::optional<size_t> count);
+    //<C-e>/<C-y>/<C-d>/<C-u> (README:1799-1803): 按行/半屏滚动视口, 光标保护 + 按原 curswant 选列
+    void ScrollView(const Buffer& buffer, char kind, std::optional<size_t> count);
     const Position& GetCursor() const ;
     const Viewport& GetViewport() const ;
     const size_t& GetDesiredColumn() const ;
-    void ScrollCursorLine(const Buffer& buffer, char kind, std::optional<size_t> count);
 
 private:
     void MoveLeft(const Buffer& buffer, size_t count);

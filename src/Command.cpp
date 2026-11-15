@@ -101,9 +101,18 @@ std::optional<EditorAction> NormalModeParser::FeedNormal(char value) {
     case 'g':
     case 'z':
         //g 前缀, 等待第二个键 (ge/gE/gg); z 前缀 (zt/zz/zb) 在窗口操作章节复用本状态
-        pending_prefix_ = 'g';
+        pending_prefix_ = value;
         state_ = State::PrefixPending;
         return std::nullopt;
+    case ControlKey('e'):
+        //<C-e>: 视口下滚 1 行 (arg_ 存普通字母, 控制字节 != 'e')
+        return EditorAction{ActionKind::Scroll, std::nullopt, std::nullopt, std::nullopt, 'e'};
+    case ControlKey('y'):
+        return EditorAction{ActionKind::Scroll, std::nullopt, std::nullopt, std::nullopt, 'y'};
+    case ControlKey('d'):
+        return EditorAction{ActionKind::Scroll, std::nullopt, std::nullopt, std::nullopt, 'd'};
+    case ControlKey('u'):
+        return EditorAction{ActionKind::Scroll, std::nullopt, std::nullopt, std::nullopt, 'u'};
     case '/': return GenerateCommand(ActionKind::EnterSearchForward);
     case '?': return GenerateCommand(ActionKind::EnterSearchBackward);
     case 'n': return GenerateCommand(ActionKind::SearchNext);
@@ -163,9 +172,9 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
         *pending_count_ = AppendCountDigit(*pending_count_, value);
         return std::nullopt;
     }
-    //count 后接 g 前缀时保留 count, 等待第二个键 (如 2ge、3gg)
+    //count 后接 g/z 前缀时保留 count, 等待第二个键 (如 2ge、3gg、3zt)
     if (value == 'g' || value == 'z') {
-        pending_prefix_ = 'g';
+        pending_prefix_ = value;
         state_ = State::PrefixPending;
         return std::nullopt;
     }
@@ -233,6 +242,14 @@ std::optional<EditorAction> NormalModeParser::FeedCount(char value) {
         return std::nullopt; // count 保留给 FeedChar 收尾时取用
     case 'J': action = GenerateCommand(ActionKind::JoinLines, pending_count_); break;
     case '~': action = GenerateCommand(ActionKind::FlipCase, pending_count_); break;
+    case ControlKey('e'):
+    case ControlKey('y'):
+    case ControlKey('d'):
+    case ControlKey('u'):
+        //[count]<C-e>/<C-y>/<C-d>/<C-u>: count 与 kind 一并带入 (kind 还原为普通字母)
+        action = EditorAction{ActionKind::Scroll, std::nullopt, pending_count_, std::nullopt,
+                              static_cast<char>(value + 0x60)};
+        break;
     default:
         //不支持的键: 取消命令并丢弃该键
         action = std::nullopt;
