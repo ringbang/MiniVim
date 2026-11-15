@@ -33,8 +33,13 @@ public:
     void SaveAs(const std::filesystem::path& path);
 
     // ---- 文本的修正与移动(一) ----
-    //保证 Buffer 至少有一行 (README:1469 提到的 EnsureNonEmpty: 行被全部删光时保留一个空行)
+    // 保证 Buffer 至少有一行 (README:1469 提到的 EnsureNonEmpty: 行被全部删光时保留一个空行)
     void EnsureNonEmpty();
+    // 只读取出 range 覆盖的文本 (供 y 写寄存器), 不修改 Buffer:
+    // 格式与 EraseRange 的返回值完全一致 (Linewise 行间 '\n' 连接、末行无 '\n';
+    // Characterwise 同行取子串, 跨行取首行尾 + 中间整行 + 末行头),
+    // 保证 y 与 d 写入的寄存器对后续 p/P 等价.
+    std::string GetRangeText(const Range& range) const;
     //删除 range 覆盖的文本并返回被删除文本 (供 d/c 写 register):
     //  Linewise: 完整行, 行间用 '\n' 连接 (README:1471 的类型语义);
     //  Characterwise: 含/不含终点字符按 kind 判定, 可跨行 (课程简化: 不自动转换行尾, README:889);

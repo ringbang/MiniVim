@@ -128,6 +128,48 @@ void Buffer::EnsureNonEmpty() {
     if (lines_.empty()) { lines_.push_back(""); }
 }
 
+// 只读取出 range 覆盖的文本 (供 y 写寄存器), 不修改 Buffer:
+// 格式与 EraseRange 的返回值完全一致 (Linewise 行间 '\n' 连接、末行无 '\n';
+// Characterwise 同行取子串, 跨行取首行尾 + 中间整行 + 末行头),
+// 保证 y 与 d 写入的寄存器对后续 p/P 等价.
+std::string Buffer::GetRangeText(const Range& range) const {
+    std::string text = "";
+    switch (range.kind_) {
+        case RangeKind::Linewise: {
+            for (size_t row = range.begin_.row_; row <= range.end_.row_; row++) {
+                text += lines_[row];
+                if (row != range.end_.row_) {
+                    text += '\n';
+                }
+            }
+            break;
+        }
+        case RangeKind::CharacterwiseExclusive:
+        case RangeKind::CharacterwiseInclusive: {
+            bool inclusive = (range.kind_ == RangeKind::CharacterwiseInclusive);
+            if (range.begin_.row_ == range.end_.row_) {
+                //同行: 只取 [begin, end) 或含 end 的子串
+                size_t n = range.end_.column_ - range.begin_.column_ + (inclusive ? 1 : 0);
+                n = std::min(n, lines_[range.begin_.row_].size() - std::min(range.begin_.column_, lines_[range.begin_.row_].size()));
+                text = lines_[range.begin_.row_].substr(range.begin_.column_, n);
+            }
+            else {
+                //跨行: 首行尾 + 中间整行 + 末行头 (与 EraseRange 的格式一致)
+                text = lines_[range.begin_.row_].substr(range.begin_.column_) + '\n';
+                for (size_t row = range.begin_.row_ + 1; row < range.end_.row_; row++) {
+                    text += lines_[row];
+                    text += '\n';
+                }
+                size_t head_len = range.end_.column_ + (inclusive ? 1 : 0);
+                head_len = std::min(head_len, lines_[range.end_.row_].size());
+                text += lines_[range.end_.row_].substr(0, head_len);
+            }
+            break;
+        }
+    }
+    return text;
+}
+
 //删除 range 覆盖的文本并返回被删除文本 (契约见 Buffer.hpp 的注释)
 //TODO(文本的修正与移动一): 实现
 std::string Buffer::EraseRange(const Range& range) {

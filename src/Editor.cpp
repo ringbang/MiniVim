@@ -26,6 +26,24 @@ std::string Trim(std::string value) {
 //判断是否为 ASCII 可打印字符, Tab 由插入模式另外处理
 bool IsPrintable(char value) { return value >= 0x20U && value < 0x7FU; }
 
+//[count]k 的目标位置 (Window::MoveUp 的纯计算版, 供 linewise 向前 yank 定位光标):
+//行号钳到第 0 行; 列按 desired_column (curswant) 换算并钳到目标行合法字符位置
+Position MoveUpTarget(const Buffer& buffer, Position origin,
+                      size_t desired_column, size_t count) {
+    Position target;
+    target.row_ = (count <= origin.row_) ? origin.row_ - count : 0;
+    const std::string& line = buffer.GetLineAt(target.row_);
+    size_t max_column = line.empty() ? 0 : line.size() - 1;
+    size_t max_render = BufferColumnToRenderColumn(line, max_column);
+    if (desired_column <= max_render) {
+        target.column_ = RenderColumnToBufferColumn(line, desired_column);
+    }
+    else {
+        target.column_ = max_column;
+    }
+    return target;
+}
+
 } // namespace
 
 //用 path 初始化文件缓冲区, Terminal 构造时会准备好终端输入环境
@@ -727,23 +745,79 @@ void Editor::ExecuteJoin(std::optional<size_t> count) {
 }
 
 //y{motion}/yy/Y
-//TODO(拷贝与粘贴): 实现 — README:1685-1691
-//1. 组装 range: 与 ExecuteDelete 完全相同的两路 (motion_spec_ → EditEngine::ComputeRange,
-//   motion 失败 → 整条命令取消; 无 motion_spec_ (yy/Y) → Linewise 当前行起 count 行,
-//   count = action.count_.value_or(1), 超末行截断)
-//2. 空范围 (CharacterwiseExclusive 且 begin == end) → 不覆盖寄存器, 直接返回 (README:897)
-//3. 取出 range 文本 (【注意】Buffer 目前只有 EraseRange 没有"只读取文本"的接口,
-//   需新增 Buffer::GetRangeText(range) 或用行级/字符级原语拼接; Linewise 行间以 '\n' 连接),
-//   写入 register_.Set('"', text, Linewise/Characterwise), 不修改 Buffer
-//4. 光标 (README:1689-1691):
-//   - Characterwise: 停在 range.begin_ (文本序起点)
-//   - Linewise 向后复制 (range.end_.row_ 在原光标之后): 光标保持原位
-//   - Linewise 向前复制 (如 yk): 光标移到对应 motion 的目标位置,
-//     列遵循该 motion 的规则并钳到目标行合法字符位置
-//   - yy/[count]Y: 光标保持原位
-//   window_.SetCursor 更新 curswant; yank 不修改 Buffer → 不调用 search_engine_.Invalidate
 void Editor::ExecuteYank(const EditorAction& action) {
-    (void)action;
+    // 1. 组装 range: 与 ExecuteDelete 完全相同的两路 (motion_spec_ → EditEngine::ComputeRange,
+    //   motion 失败 → 整条命令取消; 无 motion_spec_ (yy/Y) → Linewise 当前行起 count 行,
+    //   count = action.count_.value_or(1), 超末行截断)
+    Position cursor = window_.GetCursor();
+    size_t desired_column = window_.GetDesiredColumn();
+    size_t count = action.count_.value_or(1);
+    Range range;
+    if (action.motion_spec_) {
+        auto pre_range = EditEngine::ComputeRange(buffer_, cursor, desired_column, *action.motion_spec_);
+        if (!pre_range) {
+            return;  // 若 motion 失败则无效果
+        }
+        range = *pre_range;
+    }
+    else {
+        // yy / Y: linewise 当前行起 count 行
+        range.kind_ = RangeKind::Linewise;
+        range.begin_ = {cursor.row_, 0};
+        range.end_ = {std::min(cursor.row_ + count - 1, buffer_.GetLineCount() - 1), 0};
+    }
+
+    // 2. 空范围 (CharacterwiseExclusive 且 begin == end) → 不覆盖寄存器, 直接返回 (README:897)
+    bool empty = (range.kind_ == RangeKind::CharacterwiseExclusive && range.begin_ == range.end_);
+    // Inclusive [x,x] 在【空行】上也没有字符 
+    if (!empty && range.kind_ == RangeKind::CharacterwiseInclusive && range.begin_ == range.end_
+        && buffer_.GetLineAt(range.begin_.row_).empty()) {
+            empty = true;
+        }
+    if (empty) {
+        return;
+    }
+
+    // 3. 取出 range 文本 (【注意】Buffer 目前只有 EraseRange 没有"只读取文本"的接口,
+    //   需新增 Buffer::GetRangeText(range) 或用行级/字符级原语拼接; Linewise 行间以 '\n' 连接),
+    //   写入 register_.Set('"', text, Linewise/Characterwise), 不修改 Buffer
+    std::string text = buffer_.GetRangeText(range);
+    register_.Set(Register::kUnnamed, text, range.kind_ == RangeKind::Linewise ? RangeType::Linewise : RangeType::Characterwise);
+
+    // 4. 光标 (README:1689-1691):
+    //   - Characterwise: 停在 range.begin_ (文本序起点)
+    //   - Linewise 向后复制 (range.end_.row_ 在原光标之后): 光标保持原位
+    //   - Linewise 向前复制 (如 yk): 光标移到对应 motion 的目标位置,
+    //     列遵循该 motion 的规则并钳到目标行合法字符位置
+    //   - yy/[count]Y: 光标保持原位
+    //   window_.SetCursor 更新 curswant; yank 不修改 Buffer → 不调用 search_engine_.Invalidate
+    if (range.kind_ != RangeKind::Linewise) {
+        // Characterwise: 文本序起点 = range.begin_ (ComputeRange 保留了精确列)
+        window_.JumpTo(buffer_, range.begin_);
+    }
+    else if (action.motion_spec_) {
+        // Linewise 带 motion: 向后复制 (目标在原光标之后) → 光标保持原位;
+        // 向前复制 → 回到 motion 目标位置 (README:1689-1691)
+        Position target;
+        bool has_target = false;
+        if (action.motion_spec_->motion_ == Motion::Up) {
+            //k 的步数是 motion 的 count (y2k / 2yk 都已乘入 spec.count_),
+            //不是 action.count_ (那是 yy/Y 的行数)
+            target = MoveUpTarget(buffer_, cursor, desired_column,
+                                  action.motion_spec_->count_.value_or(1));
+            has_target = true;
+        }
+        else {
+            auto res = MotionEngine::Compute(buffer_, cursor, desired_column, *action.motion_spec_);
+            if (res.ok_) {
+                target = res.target_;
+                has_target = true;
+            }
+        }
+        if (has_target && target < cursor) {
+            window_.JumpTo(buffer_, target);
+        }
+    }
 }
 
 //p / P (before = false → 光标之后插入, true → 光标之前插入)
