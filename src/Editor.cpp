@@ -733,15 +733,27 @@ void Editor::ExecuteReplace(const EditorAction& action) {
 }
 
 //J/[count]J
-//TODO(文本的修正与移动一): 实现 — README:1515-1533
-//1. 合并行数 = max(2, count); 行数不足时按实际 (当前行已是末行 → 无效果)
-//2. 循环: 每次 buffer_.JoinForJ(row) 之前记录累计结果长度 (lines_[row].size());
-//   最后一次拼接前的那个长度就是光标位置
-//3. 光标 = EditEngine::CursorAfterJoin (钳到合法范围); window_.SetCursor
-//4. 不写 register (README:1535)
-//5. 修改了 Buffer → search_engine_.Invalidate()
 void Editor::ExecuteJoin(std::optional<size_t> count) {
-    (void)count;
+    //1. 合并行数 = max(2, count) (README:1517); 行数不足按实际截断 (README:1519)
+    Position cursor = window_.GetCursor();
+    size_t total = std::max<size_t>(2, count.value_or(1));
+    size_t avail = buffer_.GetLineCount() - cursor.row_;
+    if (avail <= 1) { return; }  // 当前行已是末行 → 无效果
+    size_t merges = std::min(total, avail) - 1;
+    //2. 循环拼接; 最后一次 JoinForJ 之前的累计结果长度即光标位置 (README:1533)
+    size_t length_before_last = 0;
+    for (size_t i = 0; i < merges; i++) {
+        if (i == merges - 1) {
+            length_before_last = buffer_.GetLineAt(cursor.row_).size();
+        }
+        buffer_.JoinForJ(cursor.row_);
+    }
+    //3. 光标: 行不变, 列 = 最后一次拼接前的累计长度 (钳到合法范围)
+    Position pos = EditEngine::CursorAfterJoin(buffer_, cursor.row_, length_before_last);
+    window_.SetCursor(buffer_, pos, false);
+    //4. 不写 register (README:1535)
+    //5. 修改了 Buffer → search_engine_.Invalidate()
+    search_engine_.Invalidate();
 }
 
 //y{motion}/yy/Y

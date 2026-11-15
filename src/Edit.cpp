@@ -153,9 +153,13 @@ Position EditEngine::CursorAfterXBack(const Buffer& buffer_after, Position origi
 
 //J 后的光标 (契约见 Edit.hpp 的注释)
 //TODO(文本的修正与移动一): 实现
-Position EditEngine::CursorAfterJoin(const Buffer& buffer_after, size_t length_before_last_join) {
-    (void)buffer_after;
-    return {0, length_before_last_join};
+Position EditEngine::CursorAfterJoin(const Buffer& buffer_after, size_t row, size_t length_before_last_join) {
+    const std::string& line = buffer_after.GetLineAt(row);
+    Position cursor{row, 0};
+    if (line.empty()) { return cursor; }  // 结果为空 → 唯一合法位置
+    //超出结果的合法字符范围时限制到行末 (vim 实测: 钳到最后一个字符)
+    cursor.column_ = std::min(length_before_last_join, line.size() - 1);
+    return cursor;
 }
 
 //[count]~ 后的光标 (契约见 Edit.hpp 的注释)

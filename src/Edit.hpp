@@ -51,8 +51,9 @@ public:
 
     // J 合并后的光标 (README:1533): 定位在"最后一次拼接之前累计结果的字节长度"处,
     // 即最后一次新增分隔空格或新接入内容的开头; 超出合法范围钳到行末; 结果为空停唯一位置.
-    // length_before_last_join 是调用方在最后一次 JoinForJ 之前记录的累计结果长度.
-    static Position CursorAfterJoin(const Buffer& buffer_after, size_t length_before_last_join);
+    // row 是拼接所在行 (J 不改变行号); length_before_last_join 是调用方在最后一次 JoinForJ
+    // 之前记录的累计结果长度.
+    static Position CursorAfterJoin(const Buffer& buffer_after, size_t row, size_t length_before_last_join);
 
     // [count]~ 后的光标 (README:1545): 停在处理范围之后的字符;
     // 已处理到行末则停本行最后一个字符. count 是实际处理的字符数.

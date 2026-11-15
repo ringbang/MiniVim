@@ -284,12 +284,37 @@ bool Buffer::FlipCaseCharacter(std::size_t row, std::size_t column) {
 }
 
 //J 的一步拼接 (契约见 Buffer.hpp 的注释)
-//TODO(文本的修正与移动一): 实现
-//1. 标记维护: 与 JoinLine 相同 (被合并行标记只上移行号; 被合并行为空行则标记失效)
-//2. 按 README:1523 的四条规则处理前导空白与分隔空格, 拼接
-//3. 置 modified_ = true; end_with_newline_ = true
 void Buffer::JoinForJ(std::size_t row) {
-    (void)row;
+    //标记维护与 JoinLine 相同 (被合并行标记只上移行号, 列不变; 被合并行为空行则标记失效)
+    bool merged_empty = lines_[row + 1].empty();
+    for (size_t i = 0; i < kMarkCount; i++) {
+        if (!mark_valid_[i]) continue;
+        if (marks_[i].row_ == row + 1) {
+            if (merged_empty) {
+                mark_valid_[i] = false;
+            } else {
+                marks_[i].row_ = row;
+            }
+        } else if (marks_[i].row_ > row + 1) {
+            marks_[i].row_--;
+        }
+    }
+    //去掉下一行开头的全部 space / Tab (README:1525)
+    const std::string& next = lines_[row + 1];
+    size_t i = 0;
+    while (i < next.size() && (next[i] == ' ' || next[i] == '\t')) { ++i; }
+    std::string stripped = next.substr(i);
+    //分隔空格 (README:1527-1529): 去空白后非空 && 累计结果非空 && 末尾不是 space/Tab && 下一行首字符不是 ')'
+    if (!stripped.empty() && !lines_[row].empty()
+        && lines_[row].back() != ' ' && lines_[row].back() != '\t'
+        && stripped[0] != ')') {
+        lines_[row] += ' ';
+    }
+    //拼接剩余内容 (保留累计结果原有的尾部空白)
+    lines_[row] += stripped;
+    lines_.erase(lines_.begin() + row + 1);
+    modified_ = true;
+    end_with_newline_ = true;
 }
 
 void Buffer::Save() {
