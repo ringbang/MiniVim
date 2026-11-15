@@ -1,4 +1,5 @@
 #include "Editor.hpp"
+#include "TextLayout.hpp"
 #include <cstdio>
 
 #include <algorithm>
@@ -763,22 +764,88 @@ void Editor::ExecutePaste(bool before, std::optional<size_t> count) {
 }
 
 //</>{motion} 与 << //>> (right = false → 左缩进, true → 右缩进)
-//TODO(缩进): 实现 — README:1637-1663
-//1. 组装 range: 与 ExecuteDelete 相同 (motion_spec_ → ComputeRange, 失败取消;
-//   doubled (<<//>>) → Linewise 当前行起 count 行, 两侧 count 乘积是【行数】不是缩进级数)
-//2. motion 失败或 Characterwise range 为空 → 无效果 (README:1649)
-//3. 处理 range 中实际包含字符或换行的所有文本行:
-//   - Exclusive range 终点恰为较后行的第 0 列 → 不包含该终点行; Linewise 包含所有行 (含空行)
-//   - 每行前导空白 (空格/Tab) 的宽度 W: 右移 → W + 4 个 space; 左移 → max(0, W - 4) 个 space
-//     (用 TextLayout 的显示宽度辅助函数换算, 处理 Tab 展开)
-//   - 真正空行保持为空; 只有空白的非空行同样按宽度规则处理
-//   - 非前导空白与正文完全不变
-//4. 成功得到至少包含一行的范围后: 光标移到第一条受影响行, 列遵循 ^ 的规则
-//   (即使该次没有改变文本); 不写 register (README:1663)
-//5. 修改了 Buffer → search_engine_.Invalidate()
 void Editor::ExecuteShift(bool right, const EditorAction& action) {
-    (void)right;
-    (void)action;
+    Position cursor = window_.GetCursor();
+    size_t desired_column = window_.GetDesiredColumn();
+    size_t count = action.count_.value_or(1);
+
+    // 1. 组装 range: 与 ExecuteDelete 相同 (motion_spec_ → ComputeRange, 
+    // 失败取消; doubled (<<//>>) → Linewise 当前行起 count 行, 两侧 count 
+    // 乘积是【行数】不是缩进级数)
+    Range range;
+    if (action.motion_spec_) {
+        auto pre_range = EditEngine::ComputeRange(buffer_, cursor, desired_column, *action.motion_spec_);
+        if (!pre_range) {
+            return;  // motion 失败则无效果
+        }
+        range = *pre_range;
+    }
+    else {
+        range.kind_ = RangeKind::Linewise;
+        range.begin_ = {cursor.row_, 0};
+        range.end_ = {std::min(cursor.row_ + count - 1, buffer_.GetLineCount() - 1), 0};
+    }
+
+    // 2. Characterwise 空范围对应无效果
+    if (range.kind_ == RangeKind::CharacterwiseExclusive && range.begin_ == range.end_) {
+        return;
+    }
+
+    // 3. 处理 range 中实际包含字符或换行的所有文本行:
+    //   - Exclusive range 终点恰为较后行的第 0 列 → 不包含该终点行; Linewise 包含所有行 (含空行)
+    //   - 每行前导空白 (空格/Tab) 的宽度 W: 右移 → W + 4 个 space; 左移 → max(0, W - 4) 个 space
+    //     (用 TextLayout 的显示宽度辅助函数换算, 处理 Tab 展开)
+    //   - 真正空行保持为空; 只有空白的非空行同样按宽度规则处理
+    //   - 非前导空白与正文完全不变
+    size_t first_row = range.begin_.row_;
+    size_t last_row = range.end_.row_;
+    if (range.kind_ == RangeKind::CharacterwiseExclusive &&
+        range.end_.row_ > range.begin_.row_ && range.end_.column_ == 0) {
+            last_row--;
+        }
+
+    // 4. 成功得到至少包含一行的范围后: 光标移到第一条受影响行, 列遵循 ^ 的规则
+    //   (即使该次没有改变文本); 不写 register (README:1663)
+    bool changed = false;
+    for (size_t row = first_row; row <= last_row; row++) {
+        const std::string& line = buffer_.GetLineAt(row);
+        if (line.empty()) {
+            continue;
+        }
+
+        // 前导空白长度 (空格 + Tab); 全空白行 prefix_len == line.size()
+        size_t prefix_len = 0;
+        while (prefix_len < line.size() && (line[prefix_len] == ' ' || line[prefix_len] == '\t')) {
+            prefix_len++;
+        }
+
+        // W = 显示宽度 (Tab 展开, 项目 tabStop = 4)
+        size_t width = BufferColumnToRenderColumn(line, prefix_len);
+        size_t new_width = right ? width + 4 : (width >= 4 ? width - 4 : 0);
+        std::string new_prefix(new_width, ' ');
+
+        // 内容没变 (如无缩进的 <<) 就不动 Buffer, 不置 modified
+        if (line.compare(0, prefix_len, new_prefix) != 0) {
+            for (size_t i = 0; i < prefix_len; i++) {
+                buffer_.EraseCharacter(row, 0);
+            }
+            for (size_t i = 0; i < new_prefix.size(); i++) {
+                buffer_.InsertCharacter(row, i, new_prefix[i]);
+            }
+            changed = true;
+        }
+    }
+
+    // 5. 光标: 第一条受影响行, 列遵循 ^ 规则 (全空白行停最后字符, 空行停唯一位置);
+    //   即使本次没有改变文本也要移动 (README:1663).
+    //   在修改之后计算——右移后光标落在新缩进后的正文开头
+    Position target = MotionEngine::LineJumpTarget(buffer_, first_row);
+    window_.JumpTo(buffer_, target);
+
+    // 6. 不写 register (README:1663); 文本有变化才失效搜索缓存
+    if (changed) {
+        search_engine_.Invalidate();
+    }
 }
 
 //~/[count]~
