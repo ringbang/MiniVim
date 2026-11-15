@@ -103,21 +103,23 @@ void Window::ScrollCursorLine(const Buffer& buffer, char kind, std::optional<siz
     if (count) {
         size_t target = (*count > 0) ? *count - 1 : 0;
         cursor_.row_ = std::min(target, buffer.GetLineCount() - 1);
+        //列按原 curswant 选择 (OJ 测试点 "counted lines and retained desired column":
+        //与 G 一致——短行停行末, 空行停唯一合法位置), curswant 本身保留
         const std::string& line = buffer.GetLineAt(cursor_.row_);
-        size_t max_col = line.empty() ? 0 : line.size() - 1;
-        cursor_.column_ = std::min(cursor_.column_, max_col);
-        //curswant 保留不重算 (vim 实测: [count]zt 只钳列, 不动 curswant; OJ 测试点 "retained desired column")
+        size_t col = RenderColumnToBufferColumn(line, desired_column_);
+        if (!line.empty() && col >= line.size()) col = line.size() - 1;
+        cursor_.column_ = col;
     }
 
-    //对齐偏移: t → 0; z → (H-1)/2 (偶数高度取靠上的中间行); b → H-1
+    //对齐偏移: t → 0; z → H/2 (OJ 测试点 125: 偶数高度取靠下的中间行; 奇数高度与 (H-1)/2 相同); b → H-1
     size_t H = viewport_.rows_;
     size_t offset = 0;
     if (kind == 'z') {
-        offset = (H - 1) / 2;
+        offset = H / 2;
     }
     else if (kind == 'b') {
         offset = H - 1;
-    } 
+    }
 
     //top_ 钳到 [0, N-1]
     size_t N = buffer.GetLineCount();
@@ -170,9 +172,12 @@ void Window::ScrollView(const Buffer& buffer, char kind, std::optional<size_t> c
     }
 
     if (half) {
-        //光标列归 0, curswant 归 0 (vim halfpage 的 beginline)
-        cursor_.column_ = 0;
-        desired_column_ = 0;
+        //C-d/C-u 光标已移动: 列按原 curswant 选 (README: "四个命令均保留 curswant",
+        //短行停在行末, 空行停在唯一合法位置; OJ 测试点 "desired columns")
+        const std::string& line = buffer.GetLineAt(cursor_.row_);
+        size_t col = RenderColumnToBufferColumn(line, desired_column_);
+        if (!line.empty() && col >= line.size()) col = line.size() - 1;
+        cursor_.column_ = col;
         return;
     }
     //C-e/C-y 光标保护 (README:1803): 挤出可见区间 → 移到最近行
