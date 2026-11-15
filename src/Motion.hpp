@@ -34,6 +34,7 @@ struct MotionResult {
 
 class MotionEngine {
 public:
+    static MotionResult ComputeFirstNonBlank(const Buffer& buffer, Position origin);        // ^
     // origin: 移动前的光标位置; curswant: 当前的期望显示列 (上下移动定位目标列用)
     // spec.count_ 为 nullopt 表示未输入 count; G/gg 以此区分"无 count"与"count=1"
     static MotionResult Compute(const Buffer& buffer, Position origin,
@@ -71,7 +72,6 @@ public:
 private:
     // ---- 光标的移动(一) ----
     static MotionResult ComputeLineStart(const Buffer& buffer, Position origin);            // 0
-    static MotionResult ComputeFirstNonBlank(const Buffer& buffer, Position origin);        // ^
     static MotionResult ComputeLineEnd(const Buffer& buffer, Position origin, MotionSpec spec); // $ / [count]$
     static MotionResult ComputeWordForward(const Buffer& buffer, Position origin, bool cap, size_t count);      // w / W
     static MotionResult ComputeWordBackward(const Buffer& buffer, Position origin, bool cap, size_t count);     // b / B

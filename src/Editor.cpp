@@ -44,6 +44,11 @@ Position MoveUpTarget(const Buffer& buffer, Position origin,
     return target;
 }
 
+// 前缀匹配辅助函数
+bool IsCommandPrefix(const std::string& name, const std::string& full) {
+    return !name.empty() && name.size() <= full.size() && full.compare(0, name.size(), name) == 0;
+}
+
 } // namespace
 
 //用 path 初始化文件缓冲区, Terminal 构造时会准备好终端输入环境
@@ -411,17 +416,44 @@ void Editor::ExecuteCommandLine() {
     std::size_t mark = exec_command.find_first_of(" \t");
     std::string command_name = (mark == std::string::npos)? exec_command: exec_command.substr(0, mark);
     std::string command_arg = (mark == std::string::npos)? "": Trim(exec_command.substr(mark + 1));
-    //3. 在 Basic 部分中你会发现最后命令就一个命令名, 直接根据要求的命令名执行
-    if (command_name == "wq") {
-        if (SaveBuffer(command_arg)) running_ = false;
+    bool force = false;
+    if (!command_name.empty() && command_name.back() == '!') {
+        force = true;
+        command_name.pop_back();
+    }
+    //3. 匹配命令名
+    if (IsCommandPrefix(command_name, "write")) {
+        if (command_arg.empty() && !buffer_.HasPath()) {
+            message_ = "No file name";
+            return;
+        }
+        SaveBuffer(command_arg);
         return;
     }
-    if (command_name == "q!" || command_name == "quit!") {
-        running_ = false;
+    if (IsCommandPrefix(command_name, "quit")) {
+        if (!command_arg.empty()) {
+            message_ = "Trailing characters";  // :q 不接受参数
+            return;
+        }
+        if (force || !buffer_.IsModified()) {
+            running_ = false;
+            return;
+        }
+        message_ = "No write since last change";
         return;
+    }
+    if (IsCommandPrefix(command_name, "edit")) {
+        ExecuteEdit(command_arg, force);
+        return;
+    }
+    if (command_name == "wq") {
+        if (SaveBuffer(command_arg)) {
+            running_ = false;
+            return;
+        }
     }
     //4. 无法识别的命令写入 message_, 供下一次刷新显示
-    message_ = "Invalid command: " + command_name;
+    message_ = "Invalid command: " + exec_command;
     return;
 }
 
@@ -433,21 +465,71 @@ void Editor::LeaveCommandLine() {
 
 
 bool Editor::SaveBuffer(const std::filesystem::path& path) {
-    //1. path 为空时调用 Save, 否则调用 SaveAs
+    // 1. 检查 path 为空
     try {
-        if (path.empty()) buffer_.Save();
-        else buffer_.SaveAs(path);
+        if (path.empty()) {
+            buffer_.Save();
+        }
+        else if (buffer_.HasPath()) {
+            buffer_.WriteTo(path);  // 有名: 另存但不改名、不清 modified
+        }
+        else {
+            buffer_.SaveAs(path);  // 无名: 改名并保存
+        }
     }
-    //2. 捕获保存时的异常, 把错误写入 message_ 并返回 false
+    // 2. 捕获保存时的异常, 把错误写入 message_ 并返回 false
     catch (const std::exception& e) {
         message_ = e.what();
         return false;
     }
-    //3. 成功后生成包含文件名和行数的提示, 返回 true, 供 wq 判断是否可以退出
+    // 3. 成功后生成包含文件名和行数的提示, 返回 true, 供 wq 判断是否可以退出
     message_ = "Saved to \"" + buffer_.GetDisplayName() + "\" with " + std::to_string(buffer_.GetLineCount()) + " lines written.";
     return true;
 }
 
+void Editor::ExecuteEdit(const std::string& arg, bool force) {
+    // 1. 目标路径: 无参数 → 重新编辑当前文件 (无名则失败)
+    std::filesystem::path target = arg;
+    bool same_file = false;
+    if (target.empty()) {
+        if (!buffer_.HasPath()) {
+            message_ = "No file name";
+            return;
+        }
+        target = buffer_.GetPath();
+        same_file = true;
+    }
+    else {
+        same_file = buffer_.HasPath() && (target == buffer_.GetPath());
+    }
+
+    // 2. 已修改且无 '!' → 整条命令失败
+    if (!force && buffer_.IsModified()) {
+        message_ = "No write since last change";
+        return;
+    }
+
+    // 3. 记住旧光标 (同名重载要恢复行号), 用 path 重建 Buffer:
+    //    文件不存在 → 新空 Buffer; modified 与全部标记随新对象清零
+    Position old_cursor = window_.GetCursor();
+    buffer_ = Buffer(target);
+
+    // 4. 光标:
+    //    换新文件 → 第 1 行第一非空白列; 同名重载 → 行保持 (钳到新行数), 列 = 第一非空白
+    Position pos{0, 0};
+    if (same_file) {
+        pos.row_ = std::min(old_cursor.row_, buffer_.GetLineCount() - 1);
+    }
+    pos.column_ = MotionEngine::ComputeFirstNonBlank(buffer_, pos).target_.column_;
+    window_.SetCursor(buffer_, pos, false);
+
+    // 5. 搜索缓存整体作废 (Buffer 内容已替换)
+    search_engine_.Invalidate();
+
+    // 6. 提示文本自由
+    message_ = "\"" + buffer_.GetDisplayName() + "\" "
+             + std::to_string(buffer_.GetLineCount()) + "L";
+}
 
 // ---- 文本的修正与移动(一) ----
 

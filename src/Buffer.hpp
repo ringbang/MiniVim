@@ -82,9 +82,12 @@ public:
     //返回最后一个被插入字符的位置 (text 为空时返回插入点); 标记维护随两个原语自动生效.
     Position InsertText(std::size_t row, std::size_t column, const std::string& text);
 
-private:
     void WriteTo(const std::filesystem::path& path) const;
+    // :w / :e 无参时判断"是否有文件名"
+    bool HasPath() const { return !path_.empty(); }
+    const std::filesystem::path& GetPath() const { return path_; }
 
+private:
     std::vector<std::string> lines_; //文件每行的字符内容,不包含末尾换行符
     std::filesystem::path path_;    //打开文件的路径
     bool modified_ = false; //文件是否被修改

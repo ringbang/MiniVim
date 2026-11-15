@@ -103,6 +103,7 @@ private:
     void HandleSearch(KeyEvent key);
 
     bool SaveBuffer(const std::filesystem::path& path = {});
+    void ExecuteEdit(const std::string& arg, bool force);
 
     Buffer buffer_; //文件的实际内容
     Terminal terminal_; //读取按键,向终端输出,管理终端设置
