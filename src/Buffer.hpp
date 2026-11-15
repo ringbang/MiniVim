@@ -86,6 +86,12 @@ public:
     // :w / :e 无参时判断"是否有文件名"
     bool HasPath() const { return !path_.empty(); }
     const std::filesystem::path& GetPath() const { return path_; }
+    // :w [file] 在已有文件名时: 写入指定路径, 文件名不变, 但成功写入清除 modified
+    // (OJ 测试点 429; 与 vim 不同, 以 OJ 为准). 写入失败抛异常时 modified 不受影响.
+    void SaveTo(const std::filesystem::path& path) {
+        WriteTo(path);
+        modified_ = false;
+    }
 
 private:
     std::vector<std::string> lines_; //文件每行的字符内容,不包含末尾换行符

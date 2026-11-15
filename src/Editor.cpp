@@ -471,7 +471,7 @@ bool Editor::SaveBuffer(const std::filesystem::path& path) {
             buffer_.Save();
         }
         else if (buffer_.HasPath()) {
-            buffer_.WriteTo(path);  // 有名: 另存但不改名、不清 modified
+            buffer_.SaveTo(path);  // 有名: 另存但不改名, 成功则清 modified (OJ 测试点 429)
         }
         else {
             buffer_.SaveAs(path);  // 无名: 改名并保存
@@ -488,45 +488,34 @@ bool Editor::SaveBuffer(const std::filesystem::path& path) {
 }
 
 void Editor::ExecuteEdit(const std::string& arg, bool force) {
-    // 1. 目标路径: 无参数 → 重新编辑当前文件 (无名则失败)
+    // 1. 参数个数不合法 (含空白的多参数) → 整条指令不执行 (README:1211; OJ 测试点 437)
+    if (arg.find_first_of(" \t") != std::string::npos) {
+        message_ = "Too many arguments";
+        return;
+    }
+    // 2. 目标路径: 无参数 → 重新编辑当前文件 (无名则失败)
     std::filesystem::path target = arg;
-    bool same_file = false;
     if (target.empty()) {
         if (!buffer_.HasPath()) {
             message_ = "No file name";
             return;
         }
         target = buffer_.GetPath();
-        same_file = true;
     }
-    else {
-        same_file = buffer_.HasPath() && (target == buffer_.GetPath());
-    }
-
-    // 2. 已修改且无 '!' → 整条命令失败
+    // 3. 已修改且无 '!' → 整条命令失败 (README:1283); '!' 丢弃修改
     if (!force && buffer_.IsModified()) {
         message_ = "No write since last change";
         return;
     }
-
-    // 3. 记住旧光标 (同名重载要恢复行号), 用 path 重建 Buffer:
-    //    文件不存在 → 新空 Buffer; modified 与全部标记随新对象清零
-    Position old_cursor = window_.GetCursor();
+    // 4. 用 path 重建 Buffer: 文件不存在 → 新空 Buffer; modified 与全部标记随新对象清零
     buffer_ = Buffer(target);
-
-    // 4. 光标:
-    //    换新文件 → 第 1 行第一非空白列; 同名重载 → 行保持 (钳到新行数), 列 = 第一非空白
+    // 5. 光标统一回到第 1 行第一非空白列 (OJ 测试点 433: 同名重载也重置光标, 不保留旧行号)
     Position pos{0, 0};
-    if (same_file) {
-        pos.row_ = std::min(old_cursor.row_, buffer_.GetLineCount() - 1);
-    }
     pos.column_ = MotionEngine::ComputeFirstNonBlank(buffer_, pos).target_.column_;
     window_.SetCursor(buffer_, pos, false);
-
-    // 5. 搜索缓存整体作废 (Buffer 内容已替换)
+    // 6. 搜索缓存整体作废 (Buffer 内容已替换)
     search_engine_.Invalidate();
-
-    // 6. 提示文本自由
+    // 7. 提示文本自由
     message_ = "\"" + buffer_.GetDisplayName() + "\" "
              + std::to_string(buffer_.GetLineCount()) + "L";
 }
